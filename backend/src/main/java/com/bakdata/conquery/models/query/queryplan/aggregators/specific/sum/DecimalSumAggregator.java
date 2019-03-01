@@ -6,6 +6,9 @@ import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.events.Block;
 import com.bakdata.conquery.models.query.queryplan.aggregators.SingleColumnAggregator;
 
+/**
+ * Specific implementation of Sum Aggregator for columns of type {@link com.bakdata.conquery.models.types.specific.DecimalType}.
+ */
 public class DecimalSumAggregator extends SingleColumnAggregator<BigDecimal> {
 
 

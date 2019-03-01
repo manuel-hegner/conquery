@@ -8,6 +8,9 @@ import com.bakdata.conquery.models.query.queryplan.aggregators.ColumnAggregator;
 
 import lombok.Getter;
 
+/**
+ * Specific implementation of Sum Aggregator for {@code addendColumn} of type {@link com.bakdata.conquery.models.types.specific.DecimalType}, but subtracting {@code subtrahendColumn}.
+ */
 public class DecimalDiffSumAggregator extends ColumnAggregator<BigDecimal> {
 
 	@Getter

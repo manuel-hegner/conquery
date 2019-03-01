@@ -7,6 +7,9 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
+/**
+ * Aggregator returning a constant value set in constructor.
+ */
 @Getter
 @RequiredArgsConstructor(onConstructor_=@JsonCreator)
 public class ConstantValueAggregator implements Aggregator<String> {

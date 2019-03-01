@@ -6,6 +6,12 @@ import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.events.Block;
 import com.bakdata.conquery.models.identifiable.ids.specific.TableId;
 
+/**
+ * An Aggregator aggregating over at least one {@link Column}.
+ *
+ * For example counting all events where a {@link com.bakdata.conquery.models.datasets.Column} has a value: {@link com.bakdata.conquery.models.query.queryplan.aggregators.specific.CountAggregator}.
+ * @param <T>
+ */
 public abstract class ColumnAggregator<T> implements Aggregator<T> {
 
 	@Override

@@ -6,6 +6,10 @@ import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.events.Block;
 import com.bakdata.conquery.models.query.queryplan.aggregators.SingleColumnAggregator;
 
+/**
+ * Returns a random value from the specified column.
+ * @param <VALUE>
+ */
 public class RandomValueAggregator<VALUE> extends SingleColumnAggregator<VALUE> {
 
 	private Object value;
@@ -19,15 +23,13 @@ public class RandomValueAggregator<VALUE> extends SingleColumnAggregator<VALUE> 
 	}
 
 	/**
-	 * length of sequence = m, but not known at event of sampling
+	 * length of sequence = m, but not known at event of sampling.
 	 *
 	 * P(switching n-th value) = 1/n
 	 *
 	 * P(n-th value = output) 	= P(switching n-th value) * P(not switching values > n)
 	 * = 1/n * n/m = 1/m
 	 *
-	 * @param block
-	 * @param event
 	 */
 	@Override
 	public void aggregateEvent(Block block, int event) {

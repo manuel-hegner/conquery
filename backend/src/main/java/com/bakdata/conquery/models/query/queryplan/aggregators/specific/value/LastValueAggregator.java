@@ -6,7 +6,10 @@ import com.bakdata.conquery.models.events.Block;
 import com.bakdata.conquery.models.query.QueryContext;
 import com.bakdata.conquery.models.query.queryplan.aggregators.SingleColumnAggregator;
 
-
+/**
+ * Returns the latest value of the column with regard to its validity date column.
+ * @param <VALUE>
+ */
 public class LastValueAggregator<VALUE> extends SingleColumnAggregator<VALUE> {
 
 	private Object value;
