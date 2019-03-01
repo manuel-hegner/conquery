@@ -6,12 +6,9 @@ import com.bakdata.conquery.models.query.queryplan.QueryPlan;
 import com.bakdata.conquery.models.query.queryplan.aggregators.Aggregator;
 import com.bakdata.conquery.models.query.queryplan.filter.FilterNode;
 
-import lombok.extern.slf4j.Slf4j;
-
 /**
- * Entity is included as when one column is equal to the selected value.
+ * Entitiy is included, when aggregation result is above zero.
  */
-@Slf4j
 public class ValueAboveZeroFilterNode<FILTER_VALUE extends FilterValue<?>, FILTER extends Filter<FILTER_VALUE>> extends AggregationResultFilterNode<Aggregator<Long>, FILTER_VALUE, FILTER> {
 
 

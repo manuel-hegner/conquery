@@ -4,15 +4,22 @@ import com.bakdata.conquery.models.common.IRange;
 import com.bakdata.conquery.models.concepts.filters.SingleColumnFilter;
 import com.bakdata.conquery.models.events.Block;
 import com.bakdata.conquery.models.query.concept.filter.FilterValue;
-import com.bakdata.conquery.models.query.queryplan.filter.FilterNode;
+import com.bakdata.conquery.models.query.filter.event.AbstractEventFilterNode;
 
+import lombok.AccessLevel;
 import lombok.Getter;
 
-public abstract class NumberFilterNode<RANGE extends IRange<?, ?>> extends FilterNode<FilterValue<RANGE>, SingleColumnFilter<FilterValue<RANGE>>> {
+/**
+ * Abstract class testing where events are included if they are within a given {@link IRange}.
+ *
+ * See: {@link FilterValue}.
+ *
+ * @param <RANGE> The type of the specified range.
+ */
+public abstract class NumberFilterNode<RANGE extends IRange<?, ?>> extends AbstractEventFilterNode<FilterValue<RANGE>, SingleColumnFilter<FilterValue<RANGE>>> {
 
-	@Getter
+	@Getter(AccessLevel.PROTECTED)
 	private RANGE range;
-	private boolean hit;
 
 	public NumberFilterNode(SingleColumnFilter filter, FilterValue<RANGE> filterValue) {
 		super(filter, filterValue);
@@ -30,14 +37,4 @@ public abstract class NumberFilterNode<RANGE extends IRange<?, ?>> extends Filte
 
 	public abstract boolean contains(Block block, int event);
 
-	@Override
-	public void acceptEvent(Block block, int event) {
-		// Assumption is that accept cannot be called when checkEvent returned false
-		hit = true;
-	}
-
-	@Override
-	public boolean isContained() {
-		return hit;
-	}
 }

@@ -12,7 +12,7 @@ import lombok.Getter;
 
 /**
  * Aggregator node forwarding only events with distinct values to {@code aggregator}.
- * @param <VALUE>
+ * @param <VALUE> Result type of delegated Aggregator.
  */
 public class DistinctValuesWrapperAggregatorNode<VALUE> extends ColumnAggregator<VALUE> {
 

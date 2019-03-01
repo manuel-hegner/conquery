@@ -7,12 +7,11 @@ import com.bakdata.conquery.models.query.queryplan.QueryPlan;
 import com.bakdata.conquery.models.query.queryplan.filter.FilterNode;
 
 /**
- * Entity is included when the number of values for a specified column are within a given range.
+ * Event is included when value in column starts with a specified prefix.
  */
-public class PrefixTextFilterNode extends FilterNode<FilterValue.CQStringFilter, PrefixTextFilter> {
+public class PrefixTextFilterNode extends AbstractEventFilterNode<FilterValue.CQStringFilter, PrefixTextFilter> {
 
 	private final String prefix;
-	private boolean hit;
 
 	public PrefixTextFilterNode(PrefixTextFilter filter, FilterValue.CQStringFilter filterValue) {
 		super(filter, filterValue);
@@ -39,13 +38,4 @@ public class PrefixTextFilterNode extends FilterNode<FilterValue.CQStringFilter,
 		return value.startsWith(prefix);
 	}
 
-	@Override
-	public void acceptEvent(Block block, int event) {
-		this.hit = true;
-	}
-
-	@Override
-	public boolean isContained() {
-		return hit;
-	}
 }

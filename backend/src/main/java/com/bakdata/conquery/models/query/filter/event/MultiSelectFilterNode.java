@@ -8,14 +8,13 @@ import com.bakdata.conquery.models.query.queryplan.filter.FilterNode;
 import com.bakdata.conquery.models.types.specific.IStringType;
 
 /**
- * Entity is included when the number of values for a specified column are within a given range.
+ * Event is included if the value column contains one of a selected set of strings.
  */
-public class MultiSelectFilterNode<FILTER extends SingleColumnFilter<FilterValue.CQMultiSelectFilter>> extends FilterNode<FilterValue.CQMultiSelectFilter, FILTER> {
+public class MultiSelectFilterNode<FILTER extends SingleColumnFilter<FilterValue.CQMultiSelectFilter>> extends AbstractEventFilterNode<FilterValue.CQMultiSelectFilter, FILTER> {
 
 
 	private final String[] selection;
 	private int[] selectedValues;
-	private boolean hit;
 
 	public MultiSelectFilterNode(FILTER filter, FilterValue.CQMultiSelectFilter filterValue) {
 		super(filter, filterValue);
@@ -58,13 +57,4 @@ public class MultiSelectFilterNode<FILTER extends SingleColumnFilter<FilterValue
 		return new MultiSelectFilterNode<>(filter, filterValue);
 	}
 
-	@Override
-	public void acceptEvent(Block block, int event) {
-		this.hit = true;
-	}
-
-	@Override
-	public boolean isContained() {
-		return hit;
-	}
 }

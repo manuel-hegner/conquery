@@ -13,6 +13,9 @@ import com.bakdata.conquery.models.query.queryplan.filter.FilterNode;
 
 import lombok.Getter;
 
+/**
+ * Abstract Filter delegating to an {@link Aggregator} where the Entitiy is included if the Aggregation result meets a certain condition.
+ */
 public abstract class AggregationResultFilterNode<AGGREGATOR extends Aggregator<?>, FILTER_VALUE extends FilterValue<?>, FILTER extends Filter<FILTER_VALUE>> extends FilterNode<FILTER_VALUE, FILTER> {
 
 	@Getter
@@ -45,6 +48,10 @@ public abstract class AggregationResultFilterNode<AGGREGATOR extends Aggregator<
 		aggregator.aggregateEvent(block, event);
 	}
 
+	/**
+	 * Test if the aggregator meets the condition.
+	 * @return true if the Aggregator meets the condition, false if not.
+	 */
 	@Override
 	public abstract boolean isContained();
 

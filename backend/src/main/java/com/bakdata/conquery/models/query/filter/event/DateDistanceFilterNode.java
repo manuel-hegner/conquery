@@ -7,20 +7,17 @@ import com.bakdata.conquery.models.events.Block;
 import com.bakdata.conquery.models.query.QueryContext;
 import com.bakdata.conquery.models.query.concept.filter.FilterValue;
 import com.bakdata.conquery.models.query.queryplan.QueryPlan;
-import com.bakdata.conquery.models.query.queryplan.filter.FilterNode;
 
 /**
- * Entity is included as long as Dates are within a certain range.
+ * Event is included as long as the Column is within a specified distance to the {@code dateRestriction}s beginning.
  */
-public class DateDistanceFilterNode extends FilterNode<FilterValue.CQIntegerRangeFilter, DateDistanceFilter> {
+public class DateDistanceFilterNode extends AbstractEventFilterNode<FilterValue.CQIntegerRangeFilter, DateDistanceFilter> {
 
-	private boolean hit;
 	private CDateSet dateRestriction;
 
 	public DateDistanceFilterNode(DateDistanceFilter dateDistanceFilter, FilterValue.CQIntegerRangeFilter filterValue) {
 		super(dateDistanceFilter, filterValue);
 	}
-
 
 	@Override
 	public void nextTable(QueryContext ctx, Table currentTable) {
@@ -38,7 +35,6 @@ public class DateDistanceFilterNode extends FilterNode<FilterValue.CQIntegerRang
 			return false;
 		}
 
-
 		int date = block.getDate(event, filter.getColumn());
 
 		if (date <= dateRestriction.getMinValue()) {
@@ -47,17 +43,5 @@ public class DateDistanceFilterNode extends FilterNode<FilterValue.CQIntegerRang
 		else {
 			return filterValue.getValue().contains(dateRestriction.getMaxValue() - date);
 		}
-	}
-
-	@Override
-	public void acceptEvent(Block block, int event) {
-		//Base class for event based filter nodes to reduce repetition?
-		this.hit = true;
-
-	}
-
-	@Override
-	public boolean isContained() {
-		return hit;
 	}
 }
