@@ -28,6 +28,7 @@ public class DateDistanceFilterNode extends SingleColumnFilterNode<Range.LongRan
 
 	@Override
 	public void nextTable(QueryContext ctx, Table currentTable) {
+		//TODO einen tag später für inklusive
 		reference = CDate.toLocalDate(ctx.getDateRestriction().getMinValue());
 	}
 
