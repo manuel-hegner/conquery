@@ -46,6 +46,8 @@ public class ConqueryConfig extends Configuration {
 	private IdMappingConfig idMapping = new NoIdMapping();
 
 	private AuthConfig authentication = new DevAuthConfig();
+	
+	private StatisticConfig statisticServer = new StatisticConfig();
 	/**
 	 * null means here that we try to deduce from an attached agent
 	 */
