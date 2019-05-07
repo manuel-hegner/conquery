@@ -24,7 +24,7 @@
               "label": "tree_label",
               "name": "test_column",
               "column": "test_table.test_column",
-              "validityDates": {"label": "datum" ,"column": "test_table.datum"}
+              "validityDates": {"label": "datum" ,"column": "test_table.dates"}
             },
             "children": [
                 {
@@ -53,8 +53,8 @@
                 },
 				"columns": [
 					{
-						"name": "datum",
-						"type": "DATE"
+						"name": "dates",
+						"type": "DATE_RANGE"
 					},
 					{
 						"name": "test_column",
