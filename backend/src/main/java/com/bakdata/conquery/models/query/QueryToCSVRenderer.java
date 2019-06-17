@@ -68,7 +68,7 @@ public class QueryToCSVRenderer {
 			.map(result -> idResult.getKey() + DELIMETER + JOINER.join(print(cfg, infos, result)));
 	}
 	
-	public static String[] print(PrintSettings cfg, List<ResultInfo> infos, Object[] value) {
+	public String[] print(PrintSettings cfg, List<ResultInfo> infos, Object[] value) {
 		String[] result = new String[value.length];
 		for(int i=0;i<infos.size();i++) {
 			result[i] = infos.get(i).getType().printNullable(cfg, value[i]);
