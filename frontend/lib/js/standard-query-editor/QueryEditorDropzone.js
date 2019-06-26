@@ -10,7 +10,7 @@ import Dropzone from "../form-components/Dropzone";
 import FaIcon from "../icon/FaIcon";
 
 import { dndTypes } from "../common/constants";
-import type { QueryIdType } from "../common/types/backend";
+import type { QueryIdType } from "../api/types";
 import type { DraggedNodeType, DraggedQueryType } from "./types";
 
 type DraggedFileType = Object;
@@ -24,7 +24,7 @@ type PropsType = {
 };
 
 const DROP_TYPES = [
-  dndTypes.CATEGORY_TREE_NODE,
+  dndTypes.CONCEPT_TREE_NODE,
   dndTypes.QUERY_NODE,
   dndTypes.PREVIOUS_QUERY,
   NativeTypes.FILE
