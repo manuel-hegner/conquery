@@ -7,8 +7,11 @@ COPY ./package.json ./yarn.lock ./
 RUN yarn --no-progress --frozen-lockfile
 
 COPY . .
+
+ENV NODE_ENV production
+
 RUN yarn run build
 
-CMD NODE_ENV=production node app/server
-
 EXPOSE 8000
+
+CMD [ "node", "app/server.js" ]
