@@ -68,13 +68,6 @@ public class ShardNode extends ConqueryCommand implements IoHandler, Managed {
 	private ScheduledExecutorService scheduler;
 	private Environment environment;
 
-	/**
-	 * Flags if the instance name should be a prefix for the instances storage.
-	 */
-	@Getter
-	@Setter
-	private boolean useNameForStoragePrefix = false;
-
 	public ShardNode() {
 		this(DEFAULT_NAME);
 	}
@@ -82,8 +75,6 @@ public class ShardNode extends ConqueryCommand implements IoHandler, Managed {
 	public ShardNode(String name) {
 		super(name, "Connects this instance as a ShardNode to a running ManagerNode.");		
 	}
-	
-
 
 
 	@Override
@@ -109,13 +100,12 @@ public class ShardNode extends ConqueryCommand implements IoHandler, Managed {
 
 		workers = new Workers(
 				getConfig().getQueries().getExecutionPool(),
-				getConfig().getQueries().getExecutionPool().getMaxThreads(),
 				config.configureObjectMapper(Jackson.MAPPER),
 				config.configureObjectMapper(Jackson.BINARY_MAPPER)
 				, getConfig().getCluster().getEntityBucketSize()
 		);
 
-		final Collection<WorkerStorage> workerStorages =config.getStorage().loadWorkerStorages(ConqueryCommand.getStoragePathParts(useNameForStoragePrefix, getName()));
+		final Collection<WorkerStorage> workerStorages = config.getStorage().loadWorkerStorages();
 
 		for(WorkerStorage workerStorage : workerStorages) {
 			workers.createWorker(workerStorage, config.isFailOnError());
@@ -157,7 +147,7 @@ public class ShardNode extends ConqueryCommand implements IoHandler, Managed {
 		setLocation(session);
 		NetworkSession networkSession = new NetworkSession(session);
 
-		context = new NetworkMessageContext.ShardNodeNetworkContext(jobManager, networkSession, workers, config, validator, useNameForStoragePrefix ? getName() : ".");
+		context = new NetworkMessageContext.ShardNodeNetworkContext(jobManager, networkSession, workers, config, validator);
 		log.info("Connected to ManagerNode @ {}", session.getRemoteAddress());
 
 		// Authenticate with ManagerNode

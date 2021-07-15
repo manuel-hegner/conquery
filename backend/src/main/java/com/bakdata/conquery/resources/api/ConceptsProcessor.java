@@ -19,17 +19,17 @@ import com.bakdata.conquery.apiv1.FilterSearch;
 import com.bakdata.conquery.apiv1.FilterSearchItem;
 import com.bakdata.conquery.apiv1.IdLabel;
 import com.bakdata.conquery.io.storage.NamespaceStorage;
-import com.bakdata.conquery.models.api.description.FEList;
-import com.bakdata.conquery.models.api.description.FERoot;
-import com.bakdata.conquery.models.api.description.FEValue;
+import com.bakdata.conquery.apiv1.frontend.FEList;
+import com.bakdata.conquery.apiv1.frontend.FERoot;
+import com.bakdata.conquery.apiv1.frontend.FEValue;
 import com.bakdata.conquery.models.auth.entities.User;
 import com.bakdata.conquery.models.auth.permissions.Ability;
-import com.bakdata.conquery.models.concepts.Concept;
-import com.bakdata.conquery.models.concepts.FrontEndConceptBuilder;
-import com.bakdata.conquery.models.concepts.filters.specific.AbstractSelectFilter;
-import com.bakdata.conquery.models.concepts.tree.ConceptTreeChild;
-import com.bakdata.conquery.models.concepts.tree.TreeConcept;
 import com.bakdata.conquery.models.datasets.Dataset;
+import com.bakdata.conquery.models.datasets.concepts.Concept;
+import com.bakdata.conquery.models.datasets.concepts.FrontEndConceptBuilder;
+import com.bakdata.conquery.models.datasets.concepts.filters.specific.AbstractSelectFilter;
+import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeChild;
+import com.bakdata.conquery.models.datasets.concepts.tree.TreeConcept;
 import com.bakdata.conquery.models.exceptions.ConceptConfigurationException;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConceptElementId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConnectorId;
@@ -44,6 +44,7 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
@@ -102,7 +103,8 @@ public class ConceptsProcessor {
 		return namespaces.getAllDatasets()
 						 .stream()
 						 .filter(d -> user.isPermitted(d, Ability.READ))
-						 .sorted(Comparator.comparing(Dataset::getWeight).thenComparing(Dataset::getLabel))
+						 .sorted(Comparator.comparing(Dataset::getWeight)
+										   .thenComparing(Dataset::getLabel))
 						 .map(d -> new IdLabel<>(d.getId(), d.getLabel()))
 						 .collect(Collectors.toList());
 	}
