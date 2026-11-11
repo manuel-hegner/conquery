@@ -4,37 +4,32 @@ import static com.bakdata.conquery.resources.ResourceConstants.ROLES_PATH_ELEMEN
 import static com.bakdata.conquery.resources.ResourceConstants.ROLE_ID;
 
 import java.util.Collection;
-import java.util.List;
-
-import javax.inject.Inject;
-import javax.validation.constraints.NotEmpty;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
 
 import com.bakdata.conquery.models.auth.entities.Role;
 import com.bakdata.conquery.models.exceptions.JSONException;
-import com.bakdata.conquery.resources.hierarchies.HAdmin;
+import com.bakdata.conquery.models.identifiable.ids.specific.RoleId;
+import lombok.RequiredArgsConstructor;
 
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 @Path(ROLES_PATH_ELEMENT)
-public class RoleResource extends HAdmin {
+@RequiredArgsConstructor(onConstructor_ = {@Inject})
+public class RoleResource {
 
-
-	@Inject
-	protected AdminProcessor processor;
+	private final AdminProcessor processor;
 
 	@POST
-	public Response postRole(Role role) throws JSONException {
+	public void postRole(Role role) throws JSONException {
 		processor.addRole(role);
-		return Response.ok().build();
 	}
 
 	@GET
@@ -44,14 +39,13 @@ public class RoleResource extends HAdmin {
 
 	@Path("{" + ROLE_ID + "}")
 	@GET
-	public Response getRole(@PathParam(ROLE_ID) Role role) throws JSONException {
-		return Response.ok(role).build();
+	public Role getRole(@PathParam(ROLE_ID) RoleId role) throws JSONException {
+		return role.resolve();
 	}
 
 	@Path("{" + ROLE_ID + "}")
 	@DELETE
-	public Response deleteRole(@PathParam(ROLE_ID) Role role) throws JSONException {
+	public void deleteRole(@PathParam(ROLE_ID) RoleId role) {
 		processor.deleteRole(role);
-		return Response.ok().build();
 	}
 }

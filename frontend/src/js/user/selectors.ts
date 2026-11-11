@@ -1,22 +1,22 @@
 import { useSelector } from "react-redux";
 
-import type { PermissionsT, GetMeResponseT, DatasetIdT } from "../api/types";
+import type { DatasetT, GetMeResponseT, PermissionsT } from "../api/types";
 import type { StateT } from "../app/reducers";
 
 interface ContextT {
   datasetId?: string;
 }
 
-export function selectPermissions(
+function selectPermissions(
   state: StateT,
-): Record<DatasetIdT, PermissionsT> | null {
-  return !!state.user.me && !!state.user.me.datasetAbilities
+): Record<DatasetT["id"], PermissionsT> | null {
+  return state.user.me?.datasetAbilities
     ? state.user.me.datasetAbilities
     : null;
 }
 
 function canDoNothing(
-  permissions: Record<DatasetIdT, PermissionsT>,
+  permissions: Record<DatasetT["id"], PermissionsT>,
   datasetId: string,
 ) {
   return !permissions[datasetId];
@@ -25,7 +25,7 @@ function canDoNothing(
 function canDo(
   state: StateT,
   canDoWithPermissions: (
-    permissions: Record<DatasetIdT, PermissionsT>,
+    permissions: Record<DatasetT["id"], PermissionsT>,
     datasetId: string,
   ) => boolean,
   context?: ContextT,
@@ -35,8 +35,9 @@ function canDo(
   if (!permissions) return false;
 
   const { selectedDatasetId } = state.datasets;
-  const datasetId: string | null =
-    context && context.datasetId ? context.datasetId : selectedDatasetId;
+  const datasetId: string | null = context?.datasetId
+    ? context.datasetId
+    : selectedDatasetId;
 
   if (!datasetId) {
     return false;
@@ -57,6 +58,18 @@ function canDo(
 //     { datasetId }
 //   );
 // }
+
+export function canViewEntityPreview(state: StateT) {
+  return canDo(state, (permissions, datasetId) => {
+    return permissions[datasetId].canViewEntityPreview === true;
+  });
+}
+
+export function canViewQueryPreview(state: StateT) {
+  return canDo(state, (permissions, datasetId) => {
+    return permissions[datasetId].canViewQueryPreview === true;
+  });
+}
 
 export function canUploadResult(state: StateT) {
   return canDo(state, (permissions, datasetId) => {

@@ -1,9 +1,9 @@
 package com.bakdata.conquery.models.config.auth;
 
 import java.util.List;
+import jakarta.validation.constraints.NotNull;
 
-import javax.validation.constraints.NotNull;
-
+import com.bakdata.conquery.apiv1.auth.ProtoRole;
 import com.bakdata.conquery.apiv1.auth.ProtoUser;
 import com.bakdata.conquery.io.cps.CPSBase;
 import com.bakdata.conquery.models.auth.UserManageable;
@@ -25,10 +25,12 @@ public interface AuthorizationConfig {
 	 */
 	@NotNull
 	List<ProtoUser> getInitialUsers();
+	List<ProtoRole> getInitialRoles();
 
 	/**
 	 * A list of permission scopes/domains that should be used to generate the permission overview as an CSV.
 	 * Usually {@link ExecutionPermission} are not included, since they add little information to the overview.
 	 */
 	List<String> getOverviewScope();
+
 }

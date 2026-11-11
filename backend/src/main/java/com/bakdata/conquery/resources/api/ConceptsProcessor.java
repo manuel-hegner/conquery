@@ -1,96 +1,88 @@
 package com.bakdata.conquery.resources.api;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import jakarta.inject.Inject;
+import jakarta.validation.Validator;
 
-import com.bakdata.conquery.apiv1.FilterSearch;
-import com.bakdata.conquery.apiv1.FilterSearchItem;
 import com.bakdata.conquery.apiv1.IdLabel;
-import com.bakdata.conquery.apiv1.frontend.FEList;
-import com.bakdata.conquery.apiv1.frontend.FERoot;
-import com.bakdata.conquery.apiv1.frontend.FEValue;
+import com.bakdata.conquery.apiv1.frontend.FrontendList;
+import com.bakdata.conquery.apiv1.frontend.FrontendPreviewConfig;
+import com.bakdata.conquery.apiv1.frontend.FrontendRoot;
+import com.bakdata.conquery.apiv1.frontend.FrontendValue;
 import com.bakdata.conquery.io.storage.NamespaceStorage;
-import com.bakdata.conquery.models.auth.entities.User;
+import com.bakdata.conquery.models.auth.entities.Subject;
 import com.bakdata.conquery.models.auth.permissions.Ability;
+import com.bakdata.conquery.models.config.ColumnConfig;
+import com.bakdata.conquery.models.config.ConqueryConfig;
 import com.bakdata.conquery.models.datasets.Dataset;
+import com.bakdata.conquery.models.datasets.PreviewConfig;
 import com.bakdata.conquery.models.datasets.concepts.Concept;
+import com.bakdata.conquery.models.datasets.concepts.ConceptElement;
 import com.bakdata.conquery.models.datasets.concepts.FrontEndConceptBuilder;
-import com.bakdata.conquery.models.datasets.concepts.filters.specific.AbstractSelectFilter;
-import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeChild;
+import com.bakdata.conquery.models.datasets.concepts.filters.specific.SelectFilter;
 import com.bakdata.conquery.models.datasets.concepts.tree.TreeConcept;
 import com.bakdata.conquery.models.exceptions.ConceptConfigurationException;
+import com.bakdata.conquery.models.exceptions.ValidatorHelper;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConceptElementId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConnectorId;
 import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import com.bakdata.conquery.models.identifiable.ids.specific.FilterId;
 import com.bakdata.conquery.models.worker.DatasetRegistry;
+import com.bakdata.conquery.models.worker.Namespace;
 import com.bakdata.conquery.util.CalculatedValue;
-import com.bakdata.conquery.util.search.QuickSearch;
-import com.bakdata.conquery.util.search.SearchScorer;
+import com.bakdata.conquery.util.search.SearchProcessor;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
-import com.google.common.collect.ImmutableList;
-import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.tuple.Pair;
 
 @Getter
 @Slf4j
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = {@Inject})
 public class ConceptsProcessor {
 
-	private final DatasetRegistry namespaces;
+	private final DatasetRegistry<? extends Namespace> namespaces;
+	private final Validator validator;
 
-	private final LoadingCache<Concept<?>, FEList> nodeCache =
-			CacheBuilder.newBuilder()
-						.softValues()
-						.expireAfterWrite(10, TimeUnit.MINUTES)
-						.build(new CacheLoader<Concept<?>, FEList>() {
-							@Override
-							public FEList load(Concept<?> concept) throws Exception {
-								return FrontEndConceptBuilder.createTreeMap(concept);
-							}
-						});
+	private final ConqueryConfig config;
 
-	private final LoadingCache<Pair<AbstractSelectFilter<?>, String>, List<FEValue>> searchCache =
-			CacheBuilder.newBuilder()
-						.softValues()
-						.build(new CacheLoader<>() {
+	@Getter(lazy = true)
+	private final FrontEndConceptBuilder frontEndConceptBuilder = new FrontEndConceptBuilder(getConfig());
 
-							@Override
-							public List<FEValue> load(Pair<AbstractSelectFilter<?>, String> filterAndSearch) throws Exception {
-								String searchTerm = filterAndSearch.getValue();
-								AbstractSelectFilter<?> filter = filterAndSearch.getKey();
-								log.trace("Calculating a new search cache for the term \"{}\" on filter[{}]", searchTerm, filter.getId());
-								return autocompleteTextFilter(filter, searchTerm);
-							}
+	private final LoadingCache<Concept<?>, FrontendList> nodeCache =
+			CacheBuilder.newBuilder().softValues().expireAfterWrite(10, TimeUnit.MINUTES).build(new CacheLoader<>() {
+				@Override
+				public FrontendList load(Concept<?> concept) {
+					return getFrontEndConceptBuilder().createTreeMap(concept);
+				}
+			});
 
-						});
 
-	public FERoot getRoot(NamespaceStorage storage, User user) {
+	public FrontendRoot getRoot(NamespaceStorage storage, Subject subject, boolean showHidden) {
 
-		return FrontEndConceptBuilder.createRoot(storage, user);
+		final FrontendRoot root = getFrontEndConceptBuilder().createRoot(storage, subject, showHidden);
+
+		// Report Violation
+		ValidatorHelper.createViolationsString(validator.validate(root), log.isTraceEnabled()).ifPresent(log::warn);
+
+		return root;
 	}
 
-	public FEList getNode(Concept<?> concept) {
+	public FrontendList getNode(Concept<?> concept) {
 		try {
 			return nodeCache.get(concept);
 		}
@@ -99,154 +91,79 @@ public class ConceptsProcessor {
 		}
 	}
 
-	public List<IdLabel<DatasetId>> getDatasets(User user) {
+	public Stream<IdLabel<DatasetId>> getDatasets(Subject subject) {
 		return namespaces.getAllDatasets()
-						 .stream()
-						 .filter(d -> user.isPermitted(d, Ability.READ))
-						 .sorted(Comparator.comparing(Dataset::getWeight)
-										   .thenComparing(Dataset::getLabel))
-						 .map(d -> new IdLabel<>(d.getId(), d.getLabel()))
-						 .collect(Collectors.toList());
+						 .filter(d -> subject.isPermitted(d, Ability.READ))
+						 .map(DatasetId::resolve)
+						 .sorted(Comparator.comparing(Dataset::getWeight).thenComparing(Dataset::getLabel))
+						 .map(d -> new IdLabel<>(d.getId(), d.getLabel()));
+	}
+
+	public FrontendPreviewConfig getEntityPreviewFrontendConfig(DatasetId dataset) {
+		final Namespace namespace = namespaces.get(dataset);
+		final PreviewConfig previewConfig = namespace.getPreviewConfig();
+
+    ConnectorId searchConnector = previewConfig.resolveSearchConnector();
+
+		// Connectors only act as bridge to table for the fronted, but also provide ConceptColumnT semantic
+		return new FrontendPreviewConfig(
+				previewConfig.getAllConnectors()
+							 .stream()
+							 .map(id -> new FrontendPreviewConfig.Labelled(id.toString(), id.resolve().getResolvedTable().getLabel()))
+							 .collect(Collectors.toSet()),
+
+				previewConfig.getDefaultConnectors()
+							 .stream()
+							 .map(id -> new FrontendPreviewConfig.Labelled(id.toString(), id.resolve().getResolvedTable().getLabel()))
+							 .collect(Collectors.toSet()),
+				previewConfig.getSearchFilters(),
+				config.getIdColumns().getIds().stream().map(ColumnConfig::getName).toList(),
+				searchConnector.getConcept(),
+				searchConnector
+		);
 	}
 
 	/**
 	 * Search for all search terms at once, with stricter scoring.
 	 * The user will upload a file and expect only well-corresponding resolutions.
 	 */
-	public ResolvedConceptsResult resolveFilterValues(AbstractSelectFilter<?> filter, List<String> searchTerms) {
+	public ResolvedFilterValues resolveFilterValues(FilterId filterId, List<String> searchTerms) {
+		final SelectFilter<?> filter = (SelectFilter<?>) filterId.resolve();
+		final Namespace namespace = namespaces.get(filter.getDataset());
 
-		//search in the full text engine
-		Set<String> searchResult = createSourceSearchResult(filter.getSourceSearch(), searchTerms, OptionalInt.empty(), filter.getSearchType()::score)
-				.stream()
-				.map(FEValue::getValue)
-				.collect(Collectors.toSet());
+		final ExactFilterValueResult exactResult = namespace.getFilterSearch().findExact(filter, searchTerms);
 
-		Set<String> openSearchTerms = new HashSet<>(searchTerms);
-		openSearchTerms.removeAll(searchResult);
-
-		// Iterate over all unresolved search terms. Gather all that match labels into searchResults. Keep the unresolvable ones.
-		for (Iterator<String> it = openSearchTerms.iterator(); it.hasNext(); ) {
-			String searchTerm = it.next();
-			// Test if any of the values occurs directly in the filter's values or their labels (for when we don't have a provided file).
-			if (filter.getValues().contains(searchTerm)) {
-				searchResult.add(searchTerm);
-				it.remove();
-			}
-			else {
-				String matchingValue = filter.getLabels().inverse().get(searchTerm);
-				if (matchingValue != null) {
-					searchResult.add(matchingValue);
-					it.remove();
-				}
-			}
-		}
-
-		return new ResolvedConceptsResult(
-				null,
-				new ResolvedFilterResult(
-						filter.getConnector().getId(),
-						filter.getId(),
-						searchResult
-								.stream()
-								.map(v -> new FEValue(filter.getLabelFor(v), v))
-								.collect(Collectors.toList())
-				),
-				new ArrayList<>(openSearchTerms)
-		);
+		return new ResolvedFilterValues(new ResolvedFilterResult(filterId.getConnector(), filter.getId().toString(), exactResult.resolved), exactResult.unresolved);
 	}
 
-	public List<FEValue> autocompleteTextFilter(AbstractSelectFilter<?> filter, String text, OptionalInt pageNumberOpt, OptionalInt itemsPerPageOpt) {
-		int pageNumber = pageNumberOpt.orElse(0);
-		int itemsPerPage = itemsPerPageOpt.orElse(50);
+	public AutoCompleteResult autocompleteTextFilter(
+			FilterId filterId,
+			String maybeText,
+			OptionalInt pageNumberOpt,
+			OptionalInt itemsPerPageOpt
+	) {
+		final int pageNumber = pageNumberOpt.orElse(0);
+		final int itemsPerPage = itemsPerPageOpt.orElse(50);
 
 		Preconditions.checkArgument(pageNumber >= 0, "Page number must be 0 or a positive integer.");
 		Preconditions.checkArgument(itemsPerPage > 1, "Must at least have one item per page.");
 
-		log.trace("Searching for for the term \"{}\". (Page = {}, Items = {})", text, pageNumber, itemsPerPage);
+		final SelectFilter<?> filter = (SelectFilter<?>) filterId.resolve();
 
-		List<FEValue> fullResult = null;
-		try {
-			fullResult = searchCache.get(Pair.of(filter, text));
-		}
-		catch (ExecutionException e) {
-			log.warn("Failed to search for \"{}\".", text, (Throwable) (log.isTraceEnabled()? e: null));
-			return ImmutableList.of();
-		}
+		log.trace("Searching for for  `{}` in `{}`. (Page = {}, Items = {})", maybeText, filterId, pageNumber, itemsPerPage);
 
-		int startIncl = fullResult.isEmpty() ? 0 : Math.min(itemsPerPage * pageNumber, fullResult.size());
-		int endExcl = Math.min(startIncl + itemsPerPage, fullResult.size());
-
-		log.trace("Preparing subresult for search term \"{}\" in the index range [{}-{})", text, startIncl, endExcl);
-		return fullResult.subList(startIncl, endExcl);
-	}
-
-	/**
-	 * Autocompletion for search terms. For values of {@link AbstractSelectFilter<?>}.
-	 * Is used by the serach cache to load missing items
-	 */
-	private static List<FEValue> autocompleteTextFilter(AbstractSelectFilter<?> filter, String text) {
-		if (Strings.isNullOrEmpty(text)) {
-			// If no text provided, we just list them
-			return filter.getSourceSearch().listItems()
-						 .stream()
-						 .map(item -> new FEValue(item.getLabel(), item.getValue(), item.getTemplateValues(), item.getOptionValue()))
-						 .collect(Collectors.toList());
-		}
-
-		List<FEValue> result = new LinkedList<>();
-
-		QuickSearch<FilterSearchItem> search = filter.getSourceSearch();
-
-		if (search != null) {
-			result = createSourceSearchResult(
-					filter.getSourceSearch(),
-					Collections.singletonList(text),
-					OptionalInt.empty(),
-					FilterSearch.FilterSearchType.CONTAINS::score
-			);
-		}
-
-		String value = filter.getValueFor(text);
-		if (value != null) {
-			result.add(new FEValue(text, value));
-		}
-
-		return result;
-	}
-
-	/**
-	 * Do a search with the supplied values.
-	 */
-	private static List<FEValue> createSourceSearchResult(QuickSearch<FilterSearchItem> search, Collection<String> values, OptionalInt numberOfTopItems, SearchScorer scorer) {
-		if (search == null) {
-			return new ArrayList<>();
-		}
-
-		// Quicksearch can split and also schedule for us.
-		List<FilterSearchItem> result = search.findItems(String.join(" ", values), numberOfTopItems.orElse(Integer.MAX_VALUE), scorer);
-
-		if (numberOfTopItems.isEmpty() && result.size() == Integer.MAX_VALUE) {
-			log.warn("The quick search returned the maximum number of results ({}) which probably means not all possible results are returned.", Integer.MAX_VALUE);
-		}
-
-		return result
-				.stream()
-				.map(item -> new FEValue(item.getLabel(), item.getValue(), item.getTemplateValues(), item.getOptionValue()))
-				.collect(Collectors.toList());
+		return namespaces.get(filter.getDataset()).getFilterSearch().query(filter, maybeText, itemsPerPage, pageNumber);
 	}
 
 	public ResolvedConceptsResult resolveConceptElements(TreeConcept concept, List<String> conceptCodes) {
-		List<ConceptElementId<?>> resolvedCodes = new ArrayList<>();
-		List<String> unknownCodes = new ArrayList<>();
 
-		if (concept == null) {
-			return new ResolvedConceptsResult(null, null, conceptCodes);
-		}
+		final Set<ConceptElementId<?>> resolvedCodes = new HashSet<>();
+		final Set<String> unknownCodes = new HashSet<>();
 
 		for (String conceptCode : conceptCodes) {
-			ConceptTreeChild child;
 			try {
-				child = concept.findMostSpecificChild(conceptCode, new CalculatedValue<>(Collections::emptyMap));
+				final ConceptElement<?> child = concept.findMostSpecificChild(conceptCode, new CalculatedValue<>(Collections::emptyMap));
+
 				if (child != null) {
 					resolvedCodes.add(child.getId());
 				}
@@ -255,29 +172,35 @@ public class ConceptsProcessor {
 				}
 			}
 			catch (ConceptConfigurationException e) {
-				log.error("Error while trying to resolve " + conceptCode, e);
+				log.error("Error while trying to resolve `{}`", conceptCode, e);
 			}
 		}
-		return new ResolvedConceptsResult(resolvedCodes, null, unknownCodes);
+		return new ResolvedConceptsResult(resolvedCodes, unknownCodes);
 	}
 
-	@Getter
-	@Setter
-	@AllArgsConstructor
-	@ToString
-	public static class ResolvedFilterResult {
-		private ConnectorId tableId;
-		private FilterId filterId;
-		private List<FEValue> value;
+	public record AutoCompleteResult(List<FrontendValue> values, long total) {
 	}
 
-	@Getter
-	@Setter
-	@AllArgsConstructor
-	@ToString
-	public static class ResolvedConceptsResult {
-		private List<ConceptElementId<?>> resolvedConcepts;
-		private ResolvedFilterResult resolvedFilter;
-		private List<String> unknownCodes;
+	public record ResolvedFilterResult(ConnectorId tableId, String filterId, Collection<FrontendValue> value) {
+		//TODO FK filterId as Id causes issues with IdUtil createParser, should investigate this
+	}
+
+	public record ResolvedFilterValues(ResolvedFilterResult resolvedFilter, Collection<String> unknownCodes) {
+
+	}
+
+	/**
+	 * Internal Container for {@link SearchProcessor#findExact}
+	 */
+	public record ExactFilterValueResult(Collection<FrontendValue> resolved, Collection<String> unresolved) {
+
+	}
+
+	@Data
+	public static final class ResolvedConceptsResult {
+		private final Set<ConceptElementId<?>> resolvedConcepts;
+		private final Collection<String> unknownCodes;
+
+
 	}
 }

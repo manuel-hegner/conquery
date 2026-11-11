@@ -1,12 +1,10 @@
-import { StateT } from "app-types";
-import React, { FC } from "react";
-import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
 
-import type { DatasetIdT } from "../api/types";
-import { validateQueryLength, validateQueryDates } from "../model/query";
-import QueryRunner from "../query-runner/QueryRunner";
+import type { DatasetT } from "../api/types";
+import type { StateT } from "../app/reducers";
+import { validateQueryLength } from "../model/query";
 import { useStartQuery, useStopQuery } from "../query-runner/actions";
+import QueryRunner from "../query-runner/QueryRunner";
 import type { QueryRunnerStateT } from "../query-runner/reducer";
 
 import type { StandardQueryStateT } from "./queryReducer";
@@ -15,24 +13,12 @@ function validateQueryStartStop({ startQuery, stopQuery }: QueryRunnerStateT) {
   return !startQuery.loading && !stopQuery.loading;
 }
 
-function validateDataset(datasetId: DatasetIdT | null) {
+function validateDataset(datasetId: DatasetT["id"] | null) {
   return datasetId !== null;
 }
 
-function useButtonTooltip(hasQueryValidDates: boolean) {
-  const { t } = useTranslation();
-
-  if (!hasQueryValidDates) {
-    return t("queryRunner.errorDates");
-  }
-
-  // Potentially add further validation and more detailed messages
-
-  return undefined;
-}
-
 const StandardQueryRunner = () => {
-  const datasetId = useSelector<StateT, DatasetIdT | null>(
+  const datasetId = useSelector<StateT, DatasetT["id"] | null>(
     (state) => state.datasets.selectedDatasetId,
   );
   const query = useSelector<StateT, StandardQueryStateT>(
@@ -48,11 +34,8 @@ const StandardQueryRunner = () => {
   const queryId = queryRunner.runningQuery;
 
   const isDatasetValid = validateDataset(datasetId);
-  const hasQueryValidDates = validateQueryDates(query);
-  const isQueryValid = validateQueryLength(query) && hasQueryValidDates;
-  const isQueryNotStartedOrStopped = validateQueryStartStop(queryRunner);
-
-  const buttonTooltip = useButtonTooltip(hasQueryValidDates);
+  const isQueryValid = validateQueryLength(query);
+  const queryStartStopReady = validateQueryStartStop(queryRunner);
 
   const startStandardQuery = useStartQuery("standard");
   const stopStandardQuery = useStopQuery("standard");
@@ -65,18 +48,15 @@ const StandardQueryRunner = () => {
     }
   };
   const stopQuery = () => {
-    if (datasetId && queryId) {
-      stopStandardQuery(datasetId, queryId);
+    if (queryId) {
+      stopStandardQuery(queryId);
     }
   };
 
   return (
     <QueryRunner
       queryRunner={queryRunner}
-      buttonTooltip={buttonTooltip}
-      isButtonEnabled={
-        isDatasetValid && isQueryValid && isQueryNotStartedOrStopped
-      }
+      disabled={!isDatasetValid || !isQueryValid || !queryStartStopReady}
       isQueryRunning={!!queryRunner.runningQuery}
       startQuery={startQuery}
       stopQuery={stopQuery}

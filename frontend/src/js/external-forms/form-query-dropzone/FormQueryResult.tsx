@@ -1,32 +1,55 @@
-import styled from "@emotion/styled";
-import React, { FC } from "react";
+import { XIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+import { exists } from "../../common/helpers/exists";
+import type { DragItemQuery } from "../../standard-query-editor/types";
+import { Button } from "../../ui-components/Button";
+import { C2 } from "../../ui-components/Typography";
 
-import IconButton from "../../button/IconButton";
-import type { PreviousQueryT } from "../../previous-queries/list/reducer";
+const root = tv({
+  base: ["px-[10px] py-[5px]", "bg-white", "rounded"],
+  variants: {
+    error: {
+      true: "border border-red",
+      false: "border border-gray-100",
+    },
+  },
+});
 
 interface PropsT {
-  queryResult?: PreviousQueryT;
+  queryResult?: DragItemQuery;
   className?: string;
+  error?: string;
   onDelete?: () => void;
 }
 
-const Root = styled("div")`
-  padding: 5px 10px;
-  background-color: white;
-  border-radius: ${({ theme }) => theme.borderRadius};
-  border: 1px solid ${({ theme }) => theme.col.grayLight};
-  font-size: ${({ theme }) => theme.font.md};
-  color: ${({ theme }) => theme.col.black};
-`;
-
-const FormQueryResult: FC<PropsT> = ({ queryResult, className, onDelete }) => {
-  if (!queryResult) return null;
-
+const FormQueryResult = ({
+  queryResult,
+  className,
+  error,
+  onDelete,
+}: PropsT) => {
+  const { t } = useTranslation();
   return (
-    <Root className={className}>
-      {queryResult.label || queryResult.id}
-      {!!onDelete && <IconButton tiny icon="times" onClick={onDelete} />}
-    </Root>
+    <div className={root({ error: exists(error), className })}>
+      {error ? (
+        <C2 as="span" tone="danger">
+          {error}
+        </C2>
+      ) : queryResult ? (
+        <C2 as="span">{queryResult.label || queryResult.id}</C2>
+      ) : null}
+      {onDelete && (
+        <Button
+          intent="tertiary"
+          size="sm"
+          aria-label={t("common.delete")}
+          onPress={onDelete}
+        >
+          <XIcon />
+        </Button>
+      )}
+    </div>
   );
 };
 

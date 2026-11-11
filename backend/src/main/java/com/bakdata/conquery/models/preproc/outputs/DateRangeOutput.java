@@ -1,14 +1,15 @@
 package com.bakdata.conquery.models.preproc.outputs;
 
 import java.time.LocalDate;
-
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 
 import com.bakdata.conquery.io.cps.CPSType;
 import com.bakdata.conquery.models.common.daterange.CDateRange;
+import com.bakdata.conquery.models.config.ConqueryConfig;
 import com.bakdata.conquery.models.events.MajorTypeId;
 import com.bakdata.conquery.models.exceptions.ParsingException;
 import com.bakdata.conquery.models.preproc.parser.Parser;
+import com.bakdata.conquery.models.preproc.parser.specific.DateRangeParser;
 import com.bakdata.conquery.util.DateReader;
 import com.google.common.base.Strings;
 import it.unimi.dsi.fastutil.objects.Object2IntArrayMap;
@@ -43,7 +44,7 @@ public class DateRangeOutput extends OutputDescription {
 	}
 
 	@Override
-	public Output createForHeaders(Object2IntArrayMap<String> headers, DateReader dateReader) {
+	public Output createForHeaders(Object2IntArrayMap<String> headers, DateReader dateReader, ConqueryConfig config) {
 		assertRequiredHeaders(headers, startColumn, endColumn);
 
 		final int startIndex = headers.getInt(startColumn);
@@ -72,5 +73,11 @@ public class DateRangeOutput extends OutputDescription {
 	@Override
 	public MajorTypeId getResultType() {
 		return MajorTypeId.DATE_RANGE;
+	}
+
+	@Override
+	public Parser<?, ?> createParser(ConqueryConfig config) {
+
+		return new DateRangeParser(config);
 	}
 }

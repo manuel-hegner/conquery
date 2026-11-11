@@ -1,0 +1,58 @@
+import { memo, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+
+import type { SelectOptionT, SelectorResultType } from "../api/types";
+import { isSelectDisabled, sortSelects } from "../model/select";
+import type { SelectedSelectorT } from "../standard-query-editor/types";
+import { ComboBoxMultiField } from "../ui-components/ComboBoxMultiField";
+
+import ContentCell from "./ContentCell";
+
+interface Props {
+  selects: SelectedSelectorT[];
+  onSelectSelects: (value: SelectOptionT[]) => void;
+  allowlistedSelects?: SelectorResultType[];
+  blocklistedSelects?: SelectorResultType[];
+}
+
+const NodeSelects = ({
+  selects,
+  blocklistedSelects,
+  allowlistedSelects,
+  onSelectSelects,
+}: Props) => {
+  const { t } = useTranslation();
+  const options = useMemo(
+    () =>
+      sortSelects(selects).map((select) => ({
+        value: select.id,
+        label: select.label,
+        disabled: isSelectDisabled(select, {
+          blocklistedSelects,
+          allowlistedSelects,
+        }),
+      })),
+    [selects, allowlistedSelects, blocklistedSelects],
+  );
+
+  const value = useMemo(
+    () =>
+      selects
+        .filter(({ selected }) => !!selected)
+        .map(({ id, label }) => ({ value: id, label: label })),
+    [selects],
+  );
+
+  return (
+    <ContentCell>
+      <ComboBoxMultiField
+        label={t("queryNodeEditor.commonSelects")}
+        onChange={onSelectSelects}
+        value={value}
+        options={options}
+      />
+    </ContentCell>
+  );
+};
+
+export default memo(NodeSelects);

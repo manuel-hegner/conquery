@@ -1,43 +1,122 @@
-import type { ColumnDescription } from "../api/types";
-import { defaultError } from "../common/actions";
-import { loadCSV } from "../file/csv";
-
+import { AsyncRecordBatchStreamReader, type RecordBatch } from "apache-arrow";
+import { t } from "i18next";
+import { useDispatch, useSelector } from "react-redux";
 import {
-  OPEN_PREVIEW,
-  CLOSE_PREVIEW,
-  LOAD_CSV_START,
-  LOAD_CSV_ERROR,
-} from "./actionTypes";
+  type ActionType,
+  createAction,
+  createAsyncAction,
+} from "typesafe-actions";
+import { useGetQuery, useGetResult, usePreviewStatistics } from "../api/api";
+import type {
+  GetQueryResponseT,
+  PreviewStatisticsResponse,
+} from "../api/types";
+import type { StateT } from "../app/reducers";
+import type { ErrorObject } from "../common/actions/genericActions";
+import { setMessage } from "../snack-message/actions";
+import type { PreviewStateT } from "./reducer";
 
-export function closePreview() {
-  return {
-    type: CLOSE_PREVIEW,
-  };
+export type PreviewActions = ActionType<
+  | typeof loadPreview
+  | typeof closePreview
+  | typeof openPreview
+  | typeof updateQueryId
+>;
+
+interface PreviewData {
+  statisticsData: PreviewStatisticsResponse;
+  queryData: GetQueryResponseT;
+  arrowReader: AsyncRecordBatchStreamReader;
+  initialTableData: IteratorResult<RecordBatch>;
+  queryId: string;
 }
 
-const loadCSVStart = () => ({ type: LOAD_CSV_START });
-const loadCSVError = (err: any) => defaultError(LOAD_CSV_ERROR, err);
-const loadCSVSuccess = (
-  parsed: { result: { data: string[][] } },
-  columns: ColumnDescription[],
-) => ({
-  type: OPEN_PREVIEW,
-  payload: {
-    csv: parsed.result.data,
-    columns,
-  },
-});
+export const loadPreview = createAsyncAction(
+  "preview/LOAD_START",
+  "preview/LOAD_SUCCESS",
+  "preview/LOAD_ERROR",
+)<void, PreviewData, ErrorObject>();
 
-export function openPreview(url: string, columns: ColumnDescription[]) {
-  return async (dispatch) => {
-    dispatch(loadCSVStart());
+export const openPreview = createAction("preview/OPEN")();
+export const closePreview = createAction("preview/CLOSE")();
+
+export const updateQueryId = createAction("preview/UPDATE_LAST_QUERY_ID")<{
+  queryId: string;
+}>();
+
+export function useLoadPreviewData() {
+  const dispatch = useDispatch();
+  const getQuery = useGetQuery();
+  const getResult = useGetResult();
+  const getStatistics = usePreviewStatistics();
+
+  const {
+    dataLoadedForQueryId,
+    arrowReader,
+    initialTableData,
+    queryData,
+    statisticsData,
+  } = useSelector<StateT, PreviewStateT>((state) => state.preview);
+
+  const currentPreviewData: PreviewData | null =
+    dataLoadedForQueryId &&
+    arrowReader &&
+    initialTableData &&
+    queryData &&
+    statisticsData
+      ? {
+          queryId: dataLoadedForQueryId,
+          statisticsData,
+          queryData,
+          arrowReader,
+          initialTableData,
+        }
+      : null;
+
+  return async (
+    queryId: string,
+    { noLoading }: { noLoading: boolean } = { noLoading: false },
+  ): Promise<PreviewData | null> => {
+    if (currentPreviewData && dataLoadedForQueryId === queryId) {
+      return currentPreviewData;
+    }
+
+    if (!noLoading) {
+      dispatch(loadPreview.request());
+    }
 
     try {
-      const parsed = await loadCSV(url);
+      const arrowReader = await AsyncRecordBatchStreamReader.from(
+        getResult(queryId, 100),
+      );
+      const loadInitialData = async () => {
+        await arrowReader.open();
+        return arrowReader.next();
+      };
 
-      dispatch(loadCSVSuccess(parsed, columns));
-    } catch (e) {
-      dispatch(loadCSVError(e));
+      const awaitedData = await Promise.all([
+        getStatistics(queryId),
+        getQuery(queryId),
+        loadInitialData(),
+      ]);
+      const payload = {
+        statisticsData: awaitedData[0],
+        queryData: awaitedData[1],
+        arrowReader: arrowReader,
+        initialTableData: awaitedData[2],
+        queryId,
+      };
+      dispatch(loadPreview.success(payload));
+      return payload;
+    } catch {
+      dispatch(
+        setMessage({
+          message: t("preview.loadingError"),
+          type: "error",
+        }),
+      );
+      dispatch(loadPreview.failure({}));
     }
+    return null;
   };
 }

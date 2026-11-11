@@ -1,52 +1,79 @@
-import React, { FC, useEffect, useState } from "react";
+import { useState } from "react";
 
 import { usePostFilterValuesResolve } from "../api/api";
 import type {
-  FilterIdT,
+  FilterT,
   PostFilterResolveResponseT,
+  PostFilterSuggestionsResponseT,
   SelectOptionT,
 } from "../api/types";
-import { getUniqueFileRows } from "../common/helpers/fileHelper";
-import { usePrevious } from "../common/helpers/usePrevious";
-import AsyncInputMultiSelect from "../ui-components/AsyncInputMultiSelect";
-import InputMultiSelect, {
-  MultiSelectInputProps,
-} from "../ui-components/InputMultiSelect";
-
-import type { FiltersContextT } from "./TableFilters";
+import { exists } from "../common/helpers/exists";
+import { ComboBoxMultiField } from "../ui-components/ComboBoxMultiField";
+import { withoutDuplicates } from "../ui-components/ComboBoxParts";
 import UploadFilterListModal from "./UploadFilterListModal";
 
-interface FilterContextT extends FiltersContextT {
-  filterId: FilterIdT;
-}
+const PAGE_SIZE = 25;
+// the backend's caps
+const MAX_AUTOCOMPLETE_TEXT_LENGTH = 500;
+const MAX_AUTOCOMPLETE_PAGE_SIZE = 500;
 
-interface PropsT {
-  context: FilterContextT;
+const getPageToLoad = (
+  prevPageLoaded: number | null,
+  currentOptionsCount: number,
+  total?: number,
+): number | null => {
+  if (currentOptionsCount === 0) return 0;
+
+  const moreCanBeLoaded = exists(total) && currentOptionsCount < total;
+  if (!moreCanBeLoaded) {
+    return null;
+  }
+
+  const nextPageBasedOnLoadedCount = Math.max(
+    0,
+    Math.ceil(currentOptionsCount / PAGE_SIZE),
+  );
+
+  return prevPageLoaded === null
+    ? nextPageBasedOnLoadedCount
+    : prevPageLoaded + 1;
+};
+
+const FilterListMultiSelect = ({
+  filterId,
+  value,
+  onChange,
+  label,
+  tooltip,
+  indexPrefix,
+  options,
+  isDisabled,
+  allowDropFile,
+  creatable,
+
+  total,
+  onLoad,
+}: {
+  filterId: FilterT["id"];
 
   label: string;
   indexPrefix?: number;
   options: SelectOptionT[];
-  disabled?: boolean;
+  isDisabled?: boolean;
   tooltip?: string;
   allowDropFile?: boolean;
+  creatable?: boolean;
 
-  isLoading?: boolean;
-  onLoad?: (prefix: string) => void;
+  total?: number;
+  onLoad?: (
+    prefix: string,
+    page: number,
+    pageSize: number,
+    config?: { returnOnly?: boolean },
+  ) => Promise<PostFilterSuggestionsResponseT | null>;
 
-  input: MultiSelectInputProps;
-}
-
-const FilterListMultiSelect: FC<PropsT> = ({
-  context,
-  input,
-  label,
-  indexPrefix,
-  options,
-  disabled,
-  allowDropFile,
-
-  onLoad,
-  isLoading,
+  value: SelectOptionT[];
+  onChange: (value: SelectOptionT[]) => void;
 }) => {
   const [resolved, setResolved] = useState<PostFilterResolveResponseT | null>(
     null,
@@ -55,100 +82,128 @@ const FilterListMultiSelect: FC<PropsT> = ({
   const [error, setError] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const postFilterValuesResolve = usePostFilterValuesResolve();
+  const [prevPageLoaded, setPrevPageLoaded] = useState<number | null>(null);
 
-  const previousDefaultValue = usePrevious(input.defaultValue);
+  const onLoadMore = async (
+    prefix: string,
+    { shouldReset }: { shouldReset?: boolean } = {},
+  ) => {
+    if (!onLoad || loading) return;
 
-  // Can be both, an auto-completable (async) multi select or a regular one
-  const Component = !!onLoad ? AsyncInputMultiSelect : InputMultiSelect;
+    const pageToLoad = shouldReset
+      ? 0
+      : getPageToLoad(prevPageLoaded, options.length, total);
 
-  const onDropFile = async (file: File) => {
+    if (pageToLoad === null) return;
+
+    setLoading(true);
+    try {
+      await onLoad(prefix, pageToLoad, PAGE_SIZE);
+      setPrevPageLoaded(pageToLoad);
+    } catch (e) {
+      // fail silently
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
+  const onLoadAndInsertAll = async (prefix: string) => {
+    if (!onLoad || loading || !exists(total)) return;
+
+    setLoading(true);
+    try {
+      const all: SelectOptionT[] = [];
+      for (let page = 0; page * MAX_AUTOCOMPLETE_PAGE_SIZE < total; page++) {
+        const suggestions = await onLoad(
+          prefix,
+          page,
+          MAX_AUTOCOMPLETE_PAGE_SIZE,
+          { returnOnly: true },
+        );
+        if (!suggestions) break;
+        all.push(...suggestions.values);
+      }
+      onChange(withoutDuplicates(value, all));
+    } catch (e) {
+      // fail silently
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
+  const onDropFile = async (rows: string[]) => {
     setLoading(true);
 
-    const rows = await getUniqueFileRows(file);
-
     try {
-      const r = await postFilterValuesResolve(
-        context.datasetId,
-        context.treeId,
-        context.tableId,
-        context.filterId,
-        rows,
-      );
+      const r = await postFilterValuesResolve(filterId, rows);
+      const hasUnknownCodes = r.unknownCodes && r.unknownCodes.length > 0;
 
-      setResolved(r);
-      setIsModalOpen(!!r.unknownCodes && r.unknownCodes.length > 0);
-
-      if (
-        r.resolvedFilter &&
-        r.resolvedFilter.value &&
-        r.resolvedFilter.value.length > 0
-      ) {
-        input.onChange(r.resolvedFilter.value);
+      if (hasUnknownCodes) {
+        setResolved(r);
+        setIsModalOpen(true);
+      } else {
+        onSubmitResolvedValues(r, { includeUnresolved: false });
       }
-    } catch (e) {
+    } catch {
       setError(true);
     }
 
     setLoading(false);
   };
 
-  useEffect(() => {
-    async function resolveDefaultValue() {
-      const hasDefaultValueToLoad =
-        input.defaultValue &&
-        input.defaultValue.length > 0 &&
-        JSON.stringify(input.defaultValue) !==
-          JSON.stringify(previousDefaultValue);
+  const onSubmitResolvedValues = (
+    resolvedResponse: PostFilterResolveResponseT,
+    {
+      includeUnresolved,
+    }: {
+      includeUnresolved?: boolean;
+    },
+  ) => {
+    const hasSomethingToInsert =
+      (resolvedResponse.resolvedFilter?.value?.length || 0) > 0 ||
+      resolvedResponse.unknownCodes.length > 0;
 
-      if (hasDefaultValueToLoad) {
-        const r = await postFilterValuesResolve(
-          context.datasetId,
-          context.treeId,
-          context.tableId,
-          context.filterId,
-          input.defaultValue as string[],
-        );
+    if (!hasSomethingToInsert) return;
 
-        if (
-          r.resolvedFilter &&
-          r.resolvedFilter.value &&
-          r.resolvedFilter.value.length > 0
-        ) {
-          input.onChange(r.resolvedFilter.value);
-        }
-      }
-    }
-    resolveDefaultValue();
-  }, [
-    context.datasetId,
-    context.filterId,
-    context.tableId,
-    context.treeId,
-    previousDefaultValue,
-    input,
-    postFilterValuesResolve,
-  ]);
+    const added = includeUnresolved
+      ? [
+          ...resolvedResponse.resolvedFilter!.value,
+          ...resolvedResponse.unknownCodes.map((item) => ({
+            label: item,
+            value: item,
+          })),
+        ]
+      : resolvedResponse.resolvedFilter!.value;
+
+    onChange(withoutDuplicates(value, added));
+  };
 
   return (
     <>
-      {allowDropFile && isModalOpen && (
+      {allowDropFile && isModalOpen && resolved && (
         <UploadFilterListModal
           resolved={resolved}
           loading={loading}
           error={error}
+          onSubmit={onSubmitResolvedValues}
           onClose={() => setIsModalOpen(false)}
         />
       )}
-      <Component
-        input={input}
+      <ComboBoxMultiField
+        value={value}
+        onChange={onChange}
         label={label}
+        tooltip={tooltip}
         options={options}
-        isLoading={isLoading || loading}
-        disabled={disabled}
+        total={total}
+        loading={loading}
+        isDisabled={isDisabled}
         indexPrefix={indexPrefix}
-        onLoad={onLoad}
-        onDropFile={onDropFile}
-        allowDropFile={allowDropFile}
+        creatable={creatable}
+        maxInputLength={onLoad ? MAX_AUTOCOMPLETE_TEXT_LENGTH : undefined}
+        onLoadMore={onLoad ? onLoadMore : undefined}
+        onLoadAndInsertAll={onLoad ? onLoadAndInsertAll : undefined}
+        onResolve={allowDropFile ? onDropFile : undefined}
       />
     </>
   );

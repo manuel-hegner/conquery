@@ -1,207 +1,138 @@
-import styled from "@emotion/styled";
-import React, { FC, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
 
 import type { PostPrefixForSuggestionsParams } from "../api/api";
-import {
-  CurrencyConfigT,
-  DatasetIdT,
+import type {
+  PostFilterSuggestionsResponseT,
   SelectOptionT,
   SelectorResultType,
 } from "../api/types";
-import { Heading3 } from "../headings/Headings";
 import { nodeIsConceptQueryNode } from "../model/node";
-import { sortSelects, isSelectDisabled } from "../model/select";
-import {
+import type {
   ConceptQueryNodeType,
+  FilterWithValueType,
   StandardQueryNodeT,
 } from "../standard-query-editor/types";
-import InputCheckbox from "../ui-components/InputCheckbox";
-import InputMultiSelect from "../ui-components/InputMultiSelect";
-import type { ModeT } from "../ui-components/InputRange";
-
+import { H3 } from "../ui-components/Typography";
+import CommonNodeSettings from "./CommonNodeSettings";
 import ContentCell from "./ContentCell";
+import NodeSelects from "./NodeSelects";
 import TableView from "./TableView";
+import { COMMON_SECTION } from "./useSectionSpy";
 
-const Column = styled("div")`
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-`;
+const sectionHeading = tv({ base: "mx-2 mt-2" });
 
-const Row = styled("div")`
-  max-width: 300px;
-  margin-bottom: 10px;
-`;
+const contentCellGroup = tv({
+  base: [
+    "pb-2",
+    "mb-2",
+    "border-b border-gray-100",
+    "last-of-type:border-b-0 last-of-type:pb-0 last-of-type:mb-0",
+  ],
+});
 
-const SectionHeading = styled(Heading3)`
-  margin: 10px 10px 0;
-`;
-
-const CommonSettingsContainer = styled("div")`
-  margin: 15px 10px;
-`;
-
-const ContentCellGroup = styled(ContentCell)`
-  padding-bottom: 10px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid ${({ theme }) => theme.col.grayLight};
-
-  &:last-of-type {
-    border-bottom: none;
-    padding-bottom: 0;
-    margin-bottom: 0;
-  }
-`;
-
-interface PropsT {
-  node: StandardQueryNodeT;
-  datasetId: DatasetIdT;
-  currencyConfig: CurrencyConfigT;
-  selectedTableIdx: number | null;
-  blocklistedSelects?: SelectorResultType[];
-  allowlistedSelects?: SelectorResultType[];
-  onShowDescription: (filterIdx: number) => void;
-  onSelectSelects: (value: SelectOptionT[]) => void;
-  onSelectTableSelects: (tableIdx: number, value: SelectOptionT[]) => void;
-  onToggleTimestamps?: () => void;
-  onToggleSecondaryIdExclude?: () => void;
-  onSetFilterValue: (tableIdx: number, filterIdx: number, value: any) => void;
-  onSwitchFilterMode: (
-    tableIdx: number,
-    filterIdx: number,
-    mode: ModeT,
-  ) => void;
-  onLoadFilterSuggestions: (
-    params: PostPrefixForSuggestionsParams,
-    tableIdx: number,
-    filterIdx: number,
-  ) => void;
-  onSetDateColumn: (tableIdx: number, value: string | null) => void;
-}
-
-const ContentColumn: FC<PropsT> = ({
+const ContentColumn = ({
   node,
-  datasetId,
-  currencyConfig,
-  selectedTableIdx,
+  registerSection,
+  registerSentinel,
   blocklistedSelects,
   allowlistedSelects,
   onLoadFilterSuggestions,
   onSetDateColumn,
   onSetFilterValue,
-  onSwitchFilterMode,
-  onShowDescription,
   onSelectSelects,
   onSelectTableSelects,
   onToggleTimestamps,
   onToggleSecondaryIdExclude,
+}: {
+  node: StandardQueryNodeT;
+  /** a ref callback per section key, for the navigation to follow the scroll */
+  registerSection: (key: string) => (element: HTMLElement | null) => void;
+  /** ref callbacks for the 1 px marks at the content's start and end */
+  registerSentinel: (
+    edge: "start" | "end",
+  ) => (element: HTMLElement | null) => void;
+  blocklistedSelects?: SelectorResultType[];
+  allowlistedSelects?: SelectorResultType[];
+  onSelectSelects: (value: SelectOptionT[]) => void;
+  onSelectTableSelects: (tableIdx: number, value: SelectOptionT[]) => void;
+  onToggleTimestamps?: () => void;
+  onToggleSecondaryIdExclude?: () => void;
+  onSetFilterValue: (
+    tableIdx: number,
+    filterIdx: number,
+    value: FilterWithValueType["value"],
+  ) => void;
+  onLoadFilterSuggestions: (
+    params: PostPrefixForSuggestionsParams,
+    tableIdx: number,
+    filterIdx: number,
+    config?: { returnOnly?: boolean },
+  ) => Promise<PostFilterSuggestionsResponseT | null>;
+  onSetDateColumn: (tableIdx: number, value: string) => void;
 }) => {
   const { t } = useTranslation();
 
   const tables = nodeIsConceptQueryNode(node) ? node.tables : [];
 
-  const itemsRef = useRef<(HTMLDivElement | null)[]>(new Array(tables.length));
-
-  useEffect(() => {
-    if (
-      selectedTableIdx !== null &&
-      itemsRef.current &&
-      itemsRef.current[selectedTableIdx]
-    ) {
-      itemsRef.current[selectedTableIdx]?.scrollIntoView({
-        block: "start",
-        inline: "start",
-        behavior: "smooth",
-      });
-    }
-  }, [selectedTableIdx]);
-
   return (
-    <Column>
-      <ContentCellGroup>
-        <SectionHeading>{t("queryNodeEditor.properties")}</SectionHeading>
-        <CommonSettingsContainer>
-          {onToggleTimestamps && (
-            <Row>
-              <InputCheckbox
-                label={t("queryNodeEditor.excludeTimestamps")}
-                tooltip={t("help.excludeTimestamps")}
-                tooltipLazy
-                input={{
-                  value: node.excludeTimestamps,
-                  onChange: () => onToggleTimestamps(),
-                }}
-              />
-            </Row>
-          )}
-          {onToggleSecondaryIdExclude && (
-            <Row>
-              <InputCheckbox
-                label={t("queryNodeEditor.excludeFromSecondaryIdQuery")}
-                tooltip={t("help.excludeFromSecondaryIdQuery")}
-                tooltipLazy
-                input={{
-                  value: node.excludeFromSecondaryIdQuery,
-                  onChange: () => onToggleSecondaryIdExclude(),
-                }}
-              />
-            </Row>
-          )}
-        </CommonSettingsContainer>
-        {nodeIsConceptQueryNode(node) && node.selects && (
-          <ContentCell headline={t("queryNodeEditor.commonSelects")}>
-            <InputMultiSelect
-              input={{
-                onChange: onSelectSelects,
-                value: node.selects
-                  .filter(({ selected }) => !!selected)
-                  .map(({ id, label }) => ({ value: id, label: label })),
-              }}
-              options={sortSelects(node.selects).map((select) => ({
-                value: select.id,
-                label: select.label,
-                disabled: isSelectDisabled(
-                  select,
-                  blocklistedSelects,
-                  allowlistedSelects,
-                ),
-              }))}
-            />
-          </ContentCell>
+    <div className="flex w-full flex-col">
+      <div className="h-px shrink-0" ref={registerSentinel("start")} />
+      <ContentCell
+        className={contentCellGroup()}
+        ref={registerSection(COMMON_SECTION)}
+      >
+        <div className={sectionHeading()}>
+          <H3>{t("queryNodeEditor.properties")}</H3>
+        </div>
+        {(onToggleSecondaryIdExclude || onToggleTimestamps) && (
+          <CommonNodeSettings
+            excludeFromSecondaryId={node.excludeFromSecondaryId}
+            onToggleSecondaryIdExclude={onToggleSecondaryIdExclude}
+            excludeTimestamps={node.excludeTimestamps}
+            onToggleTimestamps={onToggleTimestamps}
+          />
         )}
-      </ContentCellGroup>
+        {nodeIsConceptQueryNode(node) && node.selects && (
+          <NodeSelects
+            selects={node.selects}
+            onSelectSelects={onSelectSelects}
+            blocklistedSelects={blocklistedSelects}
+            allowlistedSelects={allowlistedSelects}
+          />
+        )}
+      </ContentCell>
       {tables.map((table, idx) => {
         if (table.exclude) {
           return null;
         }
 
         return (
-          <ContentCellGroup
+          <ContentCell
+            className={contentCellGroup()}
             key={table.id}
-            ref={(instance) => (itemsRef.current[idx] = instance)}
+            ref={registerSection(String(idx))}
           >
-            <SectionHeading>{table.label}</SectionHeading>
+            <div className={sectionHeading()}>
+              <H3>{table.label}</H3>
+            </div>
             <TableView
               node={
                 node as ConceptQueryNodeType /* otherwise there won't be tables */
               }
-              datasetId={datasetId}
-              currencyConfig={currencyConfig}
               tableIdx={idx}
               allowlistedSelects={allowlistedSelects}
               blocklistedSelects={blocklistedSelects}
-              onShowDescription={onShowDescription}
               onSelectTableSelects={onSelectTableSelects}
               onSetDateColumn={onSetDateColumn}
               onSetFilterValue={onSetFilterValue}
-              onSwitchFilterMode={onSwitchFilterMode}
               onLoadFilterSuggestions={onLoadFilterSuggestions}
             />
-          </ContentCellGroup>
+          </ContentCell>
         );
       })}
-    </Column>
+      <div className="h-px shrink-0" ref={registerSentinel("end")} />
+    </div>
   );
 };
 

@@ -1,12 +1,13 @@
 // This file specifies
 // - response type provided by the backend API
 // - partial types that the reponses are built from
-import { Forms } from "../external-forms/config-types";
-import type { FormConfigT } from "../external-forms/form-configs/reducer";
+import type { ReactNode } from "react";
 
-export type DatasetIdT = string;
+import type { Forms } from "../external-forms/config-types";
+import type { FormConfigT } from "../previous-queries/list/reducer";
+
 export interface DatasetT {
-  id: DatasetIdT;
+  id: string;
   label: string;
 }
 
@@ -14,67 +15,65 @@ export interface SelectOptionT {
   label: string;
   value: number | string;
   disabled?: boolean;
+  selectedLabel?: string;
+  alwaysShown?: boolean;
+  displayLabel?: ReactNode;
 }
 
-// Example: { min: "2019-01-01", max: "2019-12-31" }
+// Example: { min: "2019-01-01", max: "2019-12-31" }
 export interface DateRangeT {
   min?: string;
   max?: string;
 }
 
-export interface CurrencyConfigT {
-  prefix: string;
-  thousandSeparator: string;
-  decimalSeparator: string;
-  decimalScale: number;
-}
-
-export type FilterIdT = string;
-export interface FilterBaseT {
-  id: FilterIdT;
+interface FilterBaseT {
+  id: string;
   label: string;
   description?: string;
+  tooltip?: string;
 }
 
 export interface RangeFilterValueT {
   min?: number;
   max?: number;
-  exact?: number;
 }
 export interface RangeFilterT extends FilterBaseT {
   type: "INTEGER_RANGE" | "REAL_RANGE" | "MONEY_RANGE";
   value: RangeFilterValueT | null;
   defaultValue?: RangeFilterValueT;
   unit?: string;
-  mode: "range" | "exact";
   precision?: number;
-  min?: number;
-  max?: number;
-  pattern?: string;
+  // null when unset, the backend serializes every field
+  min?: number | null;
+  max?: number | null;
 }
 
-export type MultiSelectFilterValueT = SelectOptionT[] | FilterSuggestion[];
-export interface MultiSelectFilterBaseT extends FilterBaseT {
+export type MultiSelectFilterValueT = SelectOptionT[];
+interface MultiSelectFilterBaseT extends FilterBaseT {
   unit?: string;
-  options: SelectOptionT[] | FilterSuggestion[];
+  options: SelectOptionT[];
+  total?: number; // Not coming via the API yet, but may come soon, will be set when loading more options via autocomplete
   defaultValue?: string[];
+  allowDropFile: boolean;
+  creatable?: boolean;
 }
 
 export interface MultiSelectFilterT extends MultiSelectFilterBaseT {
   type: "MULTI_SELECT";
 }
 
+// Big = so many options that they need to be fetched async
+// using autocomplete, pagination, etc
 export interface BigMultiSelectFilterT extends MultiSelectFilterBaseT {
   type: "BIG_MULTI_SELECT";
-  allowDropFile: boolean;
   // Not needed in this format:
-  template: {
-    filePath: string; // "/.../import/stable/Referenzen/example.csv",
-    columns: string[];
-    columnValue: string; // Unclear, what that's even needed for
-    value: string;
-    optionValue: string;
-  };
+  // template: {
+  //   filePath: string; // "/.../import/stable/Referenzen/example.csv",
+  //   columns: string[];
+  //   columnValue: string; // Unclear, what that's even needed for
+  //   value: string;
+  //   optionValue: string;
+  // };
 }
 
 export type SelectFilterValueT = string | number;
@@ -85,50 +84,49 @@ export interface SelectFilterT extends FilterBaseT {
   defaultValue: SelectFilterValueT | null;
 }
 
-export type StringFilterValueT = string;
-export interface StringFilterT extends FilterBaseT {
-  type: "STRING";
-}
-
 export interface DateColumnT {
   options: SelectOptionT[];
   defaultValue: string | null;
   value?: string;
+  tooltip: string | null; // TODO: Would be better to use undefined instead of null
 }
 
 export type FilterT =
-  | StringFilterT
   | SelectFilterT
   | MultiSelectFilterT
   | RangeFilterT
   | BigMultiSelectFilterT;
 
-export type TableIdT = string;
 export interface TableT {
-  id: TableIdT;
+  id: string;
   dateColumn: DateColumnT | null;
   connectorId: string; // TODO: Get rid of two ids here (unclear when which one should be used)
   label: string;
   exclude?: boolean;
-  filters?: FilterT[]; // Empty array: key not defined
-  selects?: SelectorT[]; // Empty array: key not defined
+  default?: boolean; // not excluded by default
+  filters: FilterT[]; // Empty array: key not defined
+  selects: SelectorT[]; // Empty array: key not defined
   supportedSecondaryIds?: string[];
 }
 
-export type SelectorResultDataType =
+type SelectorResultDataType =
   | "NUMERIC"
   | "INTEGER"
   | "MONEY"
   | "BOOLEAN"
   | "STRING"
-  | "LIST";
+  | "LIST"
+  | "CATEGORICAL"
+  | "DATE"
+  | "DATE_RANGE";
+
 export interface SelectorResultType {
   type: SelectorResultDataType;
   elementType?: {
     type: Omit<SelectorResultDataType, "LIST">;
   };
 }
-export type SelectorIdT = string;
+type SelectorIdT = string;
 export interface SelectorT {
   id: SelectorIdT;
   label: string;
@@ -146,18 +144,19 @@ export type ConceptIdT = string;
 
 export interface ConceptBaseT {
   label: string;
-  active: boolean;
-  detailsAvailable: boolean;
-  codeListResolvable: boolean;
-  matchingEntries: number; // TODO: Don't send with struct nodes (even sent with 0)
-  matchingEntities: number; // TODO: Don't send with struct nodes (even sent with 0)
+  active?: boolean;
+  detailsAvailable?: boolean;
+  codeListResolvable?: boolean;
+  matchingEntries: number | null; // TODO: Don't send with struct nodes (even sent with 0)
+  matchingEntities: number | null; // TODO: Don't send with struct nodes (even sent with 0)
   children?: ConceptIdT[]; // Might be an empty struct or a "virtual node"
   description?: string; // Empty array: key not defined
   additionalInfos?: InfoT[]; // Empty array: key not defined
   dateRange?: DateRangeT;
+  excludeFromTimeAggregation?: boolean; // To default-exclude some concepts from time aggregation
 }
 
-export type ConceptStructT = ConceptBaseT;
+type ConceptStructT = ConceptBaseT;
 
 export interface ConceptElementT extends ConceptBaseT {
   parent?: ConceptIdT; // If not set, it's nested under a struct node
@@ -168,7 +167,7 @@ export interface ConceptElementT extends ConceptBaseT {
 export type ConceptT = ConceptElementT | ConceptStructT;
 
 export interface FilterConfigT {
-  filter: FilterIdT; // TODO: Rename this: "id"
+  filter: FilterT["id"]; // TODO: Rename this: "id"
   type:
     | "INTEGER_RANGE"
     | "REAL_RANGE"
@@ -178,18 +177,18 @@ export interface FilterConfigT {
     | "MULTI_SELECT"
     | "BIG_MULTI_SELECT";
   value:
-    | StringFilterValueT
     | RangeFilterValueT
     | SelectFilterValueT
-    | FilterIdT[]; // Multi select
+    | string
+    | SelectOptionT["value"][];
 }
 
-export interface DateColumnConfigT {
+interface DateColumnConfigT {
   value: string;
 }
 
 export interface TableConfigT {
-  id: TableIdT;
+  id: TableT["id"];
   filters?: FilterConfigT[];
   dateColumn?: DateColumnConfigT;
   selects: SelectorIdT[];
@@ -200,7 +199,7 @@ export interface QueryConceptNodeT {
   ids: ConceptIdT[];
   label?: string; // Used to expand
   excludeFromTimeAggregation: boolean; // TODO: Not used
-  excludeFromSecondaryIdQuery: boolean;
+  excludeFromSecondaryId: boolean;
   tables: TableConfigT[];
   selects?: SelectorIdT[];
 }
@@ -208,6 +207,7 @@ export interface QueryConceptNodeT {
 export type QueryIdT = string;
 export interface SavedQueryNodeT {
   type: "SAVED_QUERY";
+  excludeFromSecondaryId: boolean;
   query: QueryIdT; // TODO: rename this "id"
 }
 
@@ -235,17 +235,28 @@ interface BaseQueryT {
   type: "CONCEPT_QUERY";
 }
 
+interface ExternalResolvedQueryT extends BaseQueryT {
+  // TODO: Add whatever other fields are here
+  root: {
+    type: "EXTERNAL_RESOLVED";
+  };
+}
+
 export interface AndQueryT extends BaseQueryT {
   secondaryId?: string;
   root: AndNodeT;
 }
-export interface NegationQueryT extends BaseQueryT {
+interface NegationQueryT extends BaseQueryT {
   root: NegationNodeT;
 }
-export interface DateRestrictionQueryT extends BaseQueryT {
+interface DateRestrictionQueryT extends BaseQueryT {
   root: DateRestrictionNodeT;
 }
-export type QueryT = AndQueryT | NegationQueryT | DateRestrictionQueryT;
+export type QueryT =
+  | AndQueryT
+  | NegationQueryT
+  | DateRestrictionQueryT
+  | ExternalResolvedQueryT;
 export type QueryNodeT =
   | AndNodeT
   | NegationNodeT
@@ -261,7 +272,7 @@ export type QueryNodeT =
 // ---------------------------------------
 export type GetDatasetsResponseT = DatasetT[];
 
-export interface TranslatableString {
+interface TranslatableString {
   de: string;
   en?: string;
 }
@@ -275,9 +286,17 @@ export interface QueryUploadConfigT {
 }
 
 export interface GetFrontendConfigResponseT {
-  version: string;
-  currency: CurrencyConfigT;
+  versions: {
+    name: string;
+    version: string | null; // probably shouldn't be nullable at all
+    buildTime: string | null; // should be optional, not null
+  }[];
+  /** ISO 4217 code of the currency that money columns hold */
+  currency: string;
   queryUpload: QueryUploadConfigT;
+  manualUrl?: string;
+  contactEmail?: string;
+  observationPeriodStart?: string; // yyyy-mm-dd format, start of the data
 }
 
 export type GetConceptResponseT = Record<ConceptIdT, ConceptElementT>;
@@ -291,9 +310,8 @@ export interface SecondaryId {
 export interface GetConceptsResponseT {
   secondaryIds: SecondaryId[];
   concepts: {
-    [conceptId: string]: ConceptStructT | ConceptElementT;
+    [conceptId: ConceptIdT]: ConceptStructT | ConceptElementT;
   };
-  version?: number; // TODO: Is this even sent anymore?
 }
 
 // TODO: This actually returns GETQueryResponseT => a lot of unused fields
@@ -301,35 +319,105 @@ export interface PostQueriesResponseT {
   id: QueryIdT;
 }
 
-export type ColumnDescriptionKind =
+type ColumnDescriptionKind =
+  | "INTEGER"
+  | "NUMERIC"
   | "BOOLEAN"
   | "STRING"
-  | "INTEGER"
   | "MONEY"
-  | "NUMERIC"
   | "DATE"
   | "DATE_RANGE"
   | "LIST[DATE_RANGE]"
-  | "CATEGORICAL"
-  | "RESOLUTION";
+  | "LIST[STRING]";
+
+interface ColumnDescriptionSemanticColumn {
+  type: "COLUMN";
+  column: string;
+}
+export interface ColumnDescriptionSemanticConceptColumn {
+  type: "CONCEPT_COLUMN";
+  concept: string;
+}
+interface ColumnDescriptionSemanticSelect {
+  type: "SELECT";
+  select: string;
+}
+interface ColumnDescriptionSemanticSecondaryId {
+  type: "SECONDARY_ID";
+  secondaryId: string;
+}
+export interface ColumnDescriptionSemanticId {
+  type: "ID";
+  kind: string;
+}
+interface ColumnDescriptionSemanticEventDate {
+  type: "EVENT_DATE";
+}
+interface ColumnDescriptionSemanticSources {
+  type: "SOURCES";
+}
+interface ColumnDescriptionSemanticCategorical {
+  type: "CATEGORICAL";
+}
+interface ColumnDescriptionSemanticResolution {
+  type: "RESOLUTION";
+}
+interface ColumnDescriptionSemanticGroup {
+  type: "GROUP";
+}
+interface ColumnDescriptionSemanticHidden {
+  type: "HIDDEN";
+}
+
+type ColumnDescriptionSemantic =
+  | ColumnDescriptionSemanticId
+  | ColumnDescriptionSemanticSecondaryId
+  | ColumnDescriptionSemanticSelect
+  | ColumnDescriptionSemanticConceptColumn
+  | ColumnDescriptionSemanticColumn // Probably won't be used by us
+  | ColumnDescriptionSemanticEventDate
+  | ColumnDescriptionSemanticSources
+  | ColumnDescriptionSemanticCategorical // Probably won't be used by us
+  | ColumnDescriptionSemanticResolution // Probably won't be used by us
+  | ColumnDescriptionSemanticGroup
+  | ColumnDescriptionSemanticHidden;
 
 export interface ColumnDescription {
+  // `label` matches column name in CSV
+  // So it's more of an id, TODO: rename this to 'id',
   label: string;
-  selectId: string | null;
+  description: string | null;
+
   type: ColumnDescriptionKind;
+  semantics: ColumnDescriptionSemantic[];
+
+  // More of a "real" label, TODO: rename this to "label"
+  defaultLabel: string;
+
+  // NOT USED BY US:
+  selectId: string | null;
+  userConceptLabel: string | null;
+}
+
+export interface ResultUrlWithLabel {
+  label: string;
+  url: string;
 }
 
 // TODO: This actually returns GETQueryResponseT => a lot of unused fields
 export interface GetQueryResponseDoneT {
   status: "DONE" | "NEW"; // NEW might mean canceled (query not (yet) executed)
+  label: string;
   numberOfResults: number | null;
-  resultUrls: string[];
+  resultUrls: ResultUrlWithLabel[];
   columnDescriptions: ColumnDescription[] | null;
   queryType: "CONCEPT_QUERY" | "SECONDARY_ID_QUERY";
   requiredTime: number; // In ms, unused at the moment
+  containsDates: boolean;
+  previewAvailable: boolean; // Whether /queries/{id}/statistics can be requested (not the case for most forms)
 }
 
-export interface GetQueryRunningResponseT {
+interface GetQueryRunningResponseT {
   status: "RUNNING";
   progress: number | null;
 }
@@ -341,12 +429,11 @@ export interface GetQueryErrorResponseT {
 }
 
 export interface ErrorResponseT {
-  code: string; // To translate to localized messages
-  message?: string; // For developers / debugging only
-  context?: Record<string, string>; // More information to maybe display in translated messages
+  message?: string; // Localized error message (based on Accept-Language header) to show to users
+  code: string; // Previously used to translate to localized messages, now unused
 }
 
-export type GetQueryResponseStatusT =
+type GetQueryResponseStatusT =
   | GetQueryRunningResponseT
   | GetQueryResponseDoneT
   | GetQueryErrorResponseT;
@@ -383,25 +470,26 @@ export interface PostConceptResolveResponseT {
   unknownCodes?: ConceptIdT[]; // TODO: Use "unknownConcepts"
 }
 
+interface FilterSuggestion {
+  label: string;
+  value: string;
+  optionValue?: string;
+  disabled?: boolean;
+}
+
 export interface PostFilterResolveResponseT {
-  unknownCodes?: string[];
+  unknownCodes: string[];
   resolvedFilter?: {
-    filterId: FilterIdT;
-    tableId: TableIdT;
-    value: {
-      label: string;
-      value: string;
-    }[];
+    filterId: FilterT["id"];
+    tableId: TableT["id"];
+    value: FilterSuggestion[];
   };
 }
 
-export interface FilterSuggestion {
-  label: string;
-  value: string;
-  optionValue: string;
-  templateValues: Record<string, string>;
-}
-export type PostFilterSuggestionsResponseT = FilterSuggestion[];
+export type PostFilterSuggestionsResponseT = {
+  total: number;
+  values: FilterSuggestion[];
+};
 
 export type GetFormQueriesResponseT = Forms;
 
@@ -415,9 +503,19 @@ export interface UserGroupT {
   label: string;
 }
 
+export interface NewsItemT {
+  id: string;
+  title: string;
+  description: string;
+  link: string | null;
+  date: string; // ISO date
+}
+
+export type GetNewsResponseT = NewsItemT[];
+
 export interface GetMeResponseT {
   userName: string;
-  datasetAbilities: Record<DatasetIdT, PermissionsT>;
+  datasetAbilities: Record<DatasetT["id"], PermissionsT>;
   groups: UserGroupT[];
   hideLogoutButton?: boolean;
 }
@@ -426,11 +524,9 @@ export interface PostLoginResponseT {
   access_token: string;
 }
 
-export interface PostFormConfigsResponseT {
-  id: string;
-}
-
 export type GetFormConfigsResponseT = FormConfigT[];
+
+export type GetDefaultFoldersResponseT = string[];
 
 export type GetFormConfigResponseT = FormConfigT;
 
@@ -438,4 +534,94 @@ export type UploadQueryResponseT = {
   resolved: number;
   unresolvedId: string[][];
   unreadableDate: string[][];
+};
+
+export interface HistorySources {
+  all: { label: string; name: TableT["id"] }[];
+  default: { label: string; name: TableT["id"] }[];
+}
+
+export type GetEntityHistoryDefaultParamsResponse = HistorySources & {
+  searchConcept: string | null; // concept id
+  searchConnector: string | null; // connector id within the searchConcept, the table that holds the searchFilters
+  searchFilters?: string[]; // allowlisted filter ids within the searchConnector
+  prioritizedIdColumns: string[]; // id kinds, most recognizable first
+};
+
+export interface EntityInfo {
+  label: string;
+  value: string;
+  type: ColumnDescriptionKind;
+  semantics: ColumnDescriptionSemantic[];
+}
+
+interface TimeStratifiedInfoQuarter {
+  quarter: number;
+  values: {
+    [label: string]: string;
+  };
+}
+
+interface TimeStratifiedInfoYear {
+  year: number;
+  values: {
+    [label: string]: number | string[];
+  };
+  quarters: TimeStratifiedInfoQuarter[];
+}
+
+export interface TimeStratifiedInfo {
+  label: string;
+  description: string | null;
+  totals: {
+    [label: string]: number | string[];
+  };
+  // `columns[].label` matches with
+  // `year.values` and `year.quarters[].values`
+  columns: ColumnDescription[];
+  years: TimeStratifiedInfoYear[];
+}
+
+export type GetEntityHistoryResponse = {
+  resultUrls: ResultUrlWithLabel[];
+  columnDescriptions: ColumnDescription[];
+  infos: EntityInfo[];
+  timeStratifiedInfos: TimeStratifiedInfo[];
+};
+
+export type PostResolveEntitiesResponse = {
+  [idKind: string]: string; // idKind is the key, the value is the resolved ID
+}[];
+
+type BaseStatistics = {
+  label: string;
+  description?: string;
+  count: number;
+  nullValues: number;
+};
+
+export type BarStatistics = BaseStatistics & {
+  chart: "HISTO";
+  type: "INTEGER" | "DECIMAL" | "MONEY" | "STRING" | "REAL";
+  entries: { label: string; value: number }[];
+  extras: { [key: string]: string };
+};
+
+export type DateStatistics = BaseStatistics & {
+  chart: "DATES";
+  type: "DATE_RANGE" | "DATE";
+  monthCounts: Record<string, number>;
+  span: {
+    min: string; // format "yyyy-MM-dd"
+    max: string;
+  };
+};
+
+export type PreviewStatistics = BarStatistics | DateStatistics;
+
+export type PreviewStatisticsResponse = {
+  entities: number;
+  total: number; // Number of rows
+  statistics: PreviewStatistics[];
+  dateRange: DateRangeT;
 };

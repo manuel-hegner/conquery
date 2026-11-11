@@ -2,6 +2,7 @@ package com.bakdata.conquery.util.progressreporter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 import lombok.Getter;
@@ -10,12 +11,14 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ProgressReporterImpl implements ProgressReporter {
 
+	public long getMax() {
+		return max.get();
+	}
 
-	@Getter(onMethod_ = @Override)
-	private long max = 1;
-	private long innerProgress = 0;
-	private long reservedForChildren = 0;
-	private final List<ProgressReporterImpl> children = new ArrayList<ProgressReporterImpl>();
+	private final AtomicLong max = new AtomicLong(1);
+	private final AtomicLong innerProgress = new AtomicLong(0);
+	private final AtomicLong reservedForChildren = new AtomicLong(0);
+	private final List<ProgressReporterImpl> children = new ArrayList<>();
 
 	@Getter
 	private final long creationTimeMillis;
@@ -51,24 +54,24 @@ public class ProgressReporterImpl implements ProgressReporter {
 	public double getProgress() {
 		return (double) getAbsoluteProgress() / (double) getAbsoluteMax();
 	}
-	
+
 	public long getAbsoluteProgress() {
-		long absoluteProgress = innerProgress;
+		long absoluteProgress = innerProgress.get();
 
 		for (ProgressReporterImpl child : children) {
 			absoluteProgress += child.getAbsoluteProgress();
 		}
-		
+
 		return absoluteProgress;
 	}
-	
+
 	public long getAbsoluteMax() {
-		long absoluteMax = max;
+		long absoluteMax = max.get();
 
 		for (ProgressReporterImpl child : children) {
 			absoluteMax += child.getAbsoluteMax();
 		}
-		
+
 		return absoluteMax;
 	}
 
@@ -78,7 +81,7 @@ public class ProgressReporterImpl implements ProgressReporter {
 			throw new IllegalStateException("You need to start the Progress Reporter before you can add subjobs");
 		}
 
-		reservedForChildren += steps;
+		reservedForChildren.addAndGet(steps);
 
 		ProgressReporterImpl childPr = new ProgressReporterImpl();
 		childPr.start();
@@ -94,51 +97,50 @@ public class ProgressReporterImpl implements ProgressReporter {
 
 	@Override
 	public void report(int steps) {
-		if (innerProgress + steps > max) {
+		if (!isStarted()) {
+			log.warn("Progress reporter was not started", new Exception());
+			return;
+		}
+		if (innerProgress.get() + steps > max.get()) {
 			log.warn("Progress({}) + ChildProgressReserve({}) + Steps({}) is bigger than the maximum Progress({}). There might be to many reports in the code.", innerProgress, reservedForChildren, steps, max);
 			return;
 		}
 
-		innerProgress += steps;
+		innerProgress.addAndGet(steps);
 	}
 
 	@Override
 	public void setMax(long max) {
-		if (this.max > max) {
-			log.warn("Max cannot be decreased.");
+
+		if (max <= 0) {
+			log.warn("Max can not be 0 or less");
 			return;
 		}
 
-		if (max <= 0) {
-			throw new IllegalArgumentException("Max can not be 0 or less");
-		}
-
-		this.max = max;
+		this.max.set(max);
 	}
 
 	@Override
 	public void done() {
-		if(endTimeMillis > -1) {
+		if (isDone()) {
 			log.warn("Done was called again for {}", this);
 			return;
 		}
 		endTimeMillis = System.currentTimeMillis();
 
 		for (ProgressReporter child : children) {
-			if (!child.isDone()) {
-				log.warn("One or more Children are not done yet");
-			}
+			child.done();
 		}
 
 		if (getAbsoluteProgress() < getAbsoluteMax()) {
 			log.trace("Done was called before all steps were been reported. There might be missing reporting steps in the code.");
 		}
 
-		innerProgress = max - reservedForChildren;
+		innerProgress.set(max.get() - reservedForChildren.get());
 	}
-	
 
-	
+
+
 	@JsonValue
 	public ImmutableProgressReporter toImmutable() {
 		return new ImmutableProgressReporter(this);

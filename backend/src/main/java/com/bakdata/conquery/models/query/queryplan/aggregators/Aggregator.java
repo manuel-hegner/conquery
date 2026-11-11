@@ -1,12 +1,10 @@
 package com.bakdata.conquery.models.query.queryplan.aggregators;
 
 import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.externalservice.ResultType;
 import com.bakdata.conquery.models.query.queryplan.EventIterating;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 
 /**
- * An aggregator iterates over events, computing a value alongside. Values are fed through {@link Aggregator#acceptEvent(Bucket, int)}, and the result can be queried at {@link Aggregator#createAggregationResult()}.
+ * An aggregator iterates over events, computing a value alongside. Values are fed through {@link Aggregator#consumeEvent(Bucket, int)}, and the result can be queried at {@link Aggregator#createAggregationResult()}.
  * <p>
  * Every Aggregator has an associated {@code ResultType} that is used for rendering purposes.
  * <p>
@@ -27,10 +25,13 @@ public abstract class Aggregator<T> extends EventIterating {
 	 */
 	public abstract T createAggregationResult();
 
-	/**
-	 * Specific type of the result used for rendering.
-	 */
-	@JsonIgnore
-	public abstract ResultType getResultType();
+	@Override
+	public boolean acceptEvent(Bucket bucket, int event) {
+		consumeEvent(bucket, event);
+		return true;
+	}
+
+	public abstract void consumeEvent(Bucket bucket, int event) ;
+
 
 }

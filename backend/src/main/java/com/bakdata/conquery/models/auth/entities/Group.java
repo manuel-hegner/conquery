@@ -9,6 +9,7 @@ import com.bakdata.conquery.models.auth.permissions.ConqueryPermission;
 import com.bakdata.conquery.models.identifiable.ids.specific.GroupId;
 import com.bakdata.conquery.models.identifiable.ids.specific.RoleId;
 import com.bakdata.conquery.models.identifiable.ids.specific.UserId;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.Sets;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +18,6 @@ import lombok.extern.slf4j.Slf4j;
  * A group consists of users and permissions. The permissions held by the group
  * are effective for all users in the group. In Conquery, when a user shares a
  * query it is currently shared with all groups a user is in.
- *
  */
 @Slf4j
 public class Group extends PermissionOwner<GroupId> implements RoleOwner {
@@ -27,6 +27,11 @@ public class Group extends PermissionOwner<GroupId> implements RoleOwner {
 	@JsonProperty
 	private Set<RoleId> roles = Collections.synchronizedSet(new HashSet<>());
 
+	@JsonCreator
+	private Group(String name, String label) {
+		super(name, label);
+	}
+
 	public Group(String name, String label, MetaStorage storage) {
 		super(name, label, storage);
 	}
@@ -35,14 +40,22 @@ public class Group extends PermissionOwner<GroupId> implements RoleOwner {
 	public Set<ConqueryPermission> getEffectivePermissions() {
 		Set<ConqueryPermission> permissions = getPermissions();
 		for (RoleId roleId : roles) {
-			permissions = Sets.union(permissions,storage.getRole(roleId).getEffectivePermissions());
+			permissions = Sets.union(permissions, getMetaStorage().getRole(roleId).getEffectivePermissions());
 		}
 		return permissions;
 	}
 
+
+	public synchronized void addMember(UserId user) {
+		if (members.add(user)) {
+			log.trace("Added user {} to group {}", user, getId());
+			updateStorage();
+		}
+	}
+
 	@Override
-	protected void updateStorage() {
-		storage.updateGroup(this);
+	public void updateStorage() {
+		getMetaStorage().updateGroup(this);
 	}
 
 	@Override
@@ -50,38 +63,31 @@ public class Group extends PermissionOwner<GroupId> implements RoleOwner {
 		return new GroupId(name);
 	}
 
-	public synchronized void addMember(User user) {
-		if(members.add(user.getId())) {
-			log.trace("Added user {} to group {}", user.getId(), getId());
+	public synchronized void removeMember(UserId user) {
+		if (members.remove(user)) {
+			log.trace("Removed user {} from group {}", user, getId());
 			updateStorage();
 		}
 	}
 
-	public synchronized void removeMember(User user) {
-		if (members.remove(user.getId())) {
-			log.trace("Removed user {} from group {}", user.getId(), getId());
-			updateStorage();
-		}
-	}
-
-	public boolean containsMember(User user) {
-		return members.contains(user.getId());
+	public boolean containsUser(UserId user) {
+		return members.contains(user);
 	}
 
 	public Set<UserId> getMembers() {
 		return Collections.unmodifiableSet(members);
 	}
 
-	public synchronized void addRole(Role role) {
-		if (roles.add(role.getId())) {
-			log.trace("Added role {} to group {}", role.getId(), getId());
+	public synchronized void addRole(RoleId role) {
+		if (roles.add(role)) {
+			log.trace("Added role {} to group {}", role, getId());
 			updateStorage();
 		}
 	}
 
-	public synchronized void removeRole(Role role) {
-		if (roles.remove(role.getId())) {
-			log.trace("Removed role {} from group {}", role.getId(), getId());
+	public synchronized void removeRole(RoleId role) {
+		if (roles.remove(role)) {
+			log.trace("Removed role {} from group {}", role, getId());
 			updateStorage();
 		}
 	}

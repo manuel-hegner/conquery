@@ -1,14 +1,12 @@
-import { ThemeProvider, Theme } from "@emotion/react";
-import { StateT } from "app-types";
-import React from "react";
-import ReactDOM from "react-dom";
-import { Store } from "redux";
+import { createRoot } from "react-dom/client";
+import type { Store } from "redux";
+
+import "../fonts.css";
+import "../index.css";
 
 import AppRoot from "./AppRoot";
-import GlobalStyles from "./GlobalStyles";
-import "./browserShimsAndPolyfills";
-import { initializeEnvironment, CustomEnvironment } from "./environment";
-import { TabT } from "./pane/types";
+import type { StateT } from "./app/reducers";
+import { type AppTheme, AppThemeContext } from "./app-theme-context";
 import { makeStore } from "./store";
 
 // TODO: OG image required?
@@ -17,30 +15,18 @@ import { makeStore } from "./store";
 
 let store: Store<StateT>;
 
-const initialState = {};
+const renderRoot = (theme: AppTheme) => {
+  store = store || makeStore();
 
-// Render the App including Hot Module Replacement
-const renderRoot = (tabs: TabT[], theme: Theme) => {
-  store = store || makeStore(initialState, tabs);
+  const root = createRoot(document.getElementById("root")!);
 
-  ReactDOM.render(
-    <ThemeProvider theme={theme}>
-      <GlobalStyles />
-      <AppRoot store={store} rightTabs={tabs} />
-    </ThemeProvider>,
-    document.getElementById("root"),
+  return root.render(
+    <AppThemeContext.Provider value={theme}>
+      <AppRoot store={store} />
+    </AppThemeContext.Provider>,
   );
 };
 
-export default function conquery({
-  theme,
-  tabs,
-  customEnvironment,
-}: {
-  theme: Theme; // React-Emotion theme, will at some point completely replace sass
-  tabs: TabT[];
-  customEnvironment: CustomEnvironment;
-}) {
-  initializeEnvironment(customEnvironment);
-  renderRoot(tabs, theme);
+export default function conquery({ theme }: { theme: AppTheme }) {
+  return renderRoot(theme);
 }

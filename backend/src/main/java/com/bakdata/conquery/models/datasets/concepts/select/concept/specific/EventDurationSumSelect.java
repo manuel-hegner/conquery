@@ -1,13 +1,15 @@
 package com.bakdata.conquery.models.datasets.concepts.select.concept.specific;
 
-import c10n.C10N;
-import com.bakdata.conquery.internationalization.ResultHeadersC10n;
+
 import com.bakdata.conquery.io.cps.CPSType;
 import com.bakdata.conquery.models.datasets.concepts.select.Select;
 import com.bakdata.conquery.models.datasets.concepts.select.concept.UniversalSelect;
-import com.bakdata.conquery.models.i18n.I18n;
 import com.bakdata.conquery.models.query.queryplan.aggregators.Aggregator;
 import com.bakdata.conquery.models.query.queryplan.aggregators.specific.EventDurationSumAggregator;
+import com.bakdata.conquery.models.types.ResultType;
+import com.bakdata.conquery.sql.conversion.model.select.EventDurationSumSelectConverter;
+import com.bakdata.conquery.sql.conversion.model.select.SelectConverter;
+import com.bakdata.conquery.sql.execution.ResultSetProcessor;
 import com.google.common.base.Preconditions;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -16,11 +18,6 @@ import org.apache.commons.lang3.StringUtils;
 @CPSType(id = "EVENT_DURATION_SUM", base = Select.class)
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class EventDurationSumSelect extends UniversalSelect {
-
-	@Override
-	public String getLabel() {
-		return C10N.get(ResultHeadersC10n.class, I18n.LOCALE.get()).eventDuration();
-	}
 
 
 	@Override
@@ -33,5 +30,25 @@ public class EventDurationSumSelect extends UniversalSelect {
 		EventDurationSumSelect select = new EventDurationSumSelect();
 		select.setName(name);
 		return select;
+	}
+
+	@Override
+	public boolean isEventDateSelect() {
+		return true;
+	}
+
+	@Override
+	public ResultSetProcessor.Reader<Integer> createResultSetReader(ResultSetProcessor processor) {
+		return processor::getInteger;
+	}
+
+	@Override
+	public SelectConverter<EventDurationSumSelect> createConverter() {
+		return new EventDurationSumSelectConverter();
+	}
+
+	@Override
+	public ResultType getResultType() {
+		return ResultType.Primitive.INTEGER;
 	}
 }

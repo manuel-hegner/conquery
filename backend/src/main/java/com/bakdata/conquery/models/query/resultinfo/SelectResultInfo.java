@@ -1,38 +1,53 @@
 package com.bakdata.conquery.models.query.resultinfo;
 
-import com.bakdata.conquery.models.datasets.concepts.select.Select;
-import com.bakdata.conquery.models.externalservice.ResultType;
-import com.bakdata.conquery.models.query.ColumnDescriptor;
-import com.bakdata.conquery.models.query.PrintSettings;
+import java.util.Set;
+
 import com.bakdata.conquery.apiv1.query.concept.specific.CQConcept;
+import com.bakdata.conquery.models.datasets.concepts.select.Select;
+import com.bakdata.conquery.models.query.PrintSettings;
+import com.bakdata.conquery.models.query.resultinfo.printers.Printer;
+import com.bakdata.conquery.models.query.resultinfo.printers.PrinterFactory;
+import com.bakdata.conquery.models.types.ResultType;
+import com.bakdata.conquery.models.types.SemanticType;
+import com.bakdata.conquery.sql.execution.ResultSetProcessor;
+import com.google.common.collect.Sets;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
 
 @Getter
 @EqualsAndHashCode(callSuper = true)
-@RequiredArgsConstructor
 public class SelectResultInfo extends ResultInfo {
 	@NonNull
 	private final Select select;
 	@NonNull
 	private final CQConcept cqConcept;
 
+	public SelectResultInfo(@NonNull Select select, @NonNull CQConcept cqConcept, Set<SemanticType> semantics) {
+		super(Sets.union(semantics, Set.of(new SemanticType.SelectResultT(select.getId()))));
+		this.select = select;
+		this.cqConcept = cqConcept;
+	}
+
+
 	@Override
-	public ResultType getType() {
-		return select.getResultType();
+	public String getDescription() {
+		return select.getDescription();
 	}
 
 	@Override
-	public ColumnDescriptor asColumnDescriptor(PrintSettings settings) {
-		return ColumnDescriptor.builder()
-				.label(getUniqueName(settings))
-				.defaultLabel(defaultColumnName(settings))
-				.userConceptLabel(userColumnName(settings))
-				.type(getType().typeInfo())
-				.selectId(select.getId())
-				.build();
+	public Printer createPrinter(PrinterFactory printerFactory, PrintSettings printSettings) {
+		return select.createPrinter(printerFactory, printSettings);
+	}
+
+	@Override
+	public ResultSetProcessor.Reader<?> createReader(ResultSetProcessor resultSetProcessor) {
+		return select.createResultSetReader(resultSetProcessor);
+	}
+
+	@Override
+	public ResultType getType() {
+		return select.getResultType();
 	}
 
 	@Override
@@ -48,13 +63,7 @@ public class SelectResultInfo extends ResultInfo {
 			return null;
 		}
 
-		StringBuilder sb = new StringBuilder();
-
-		sb.append(label);
-		sb.append(" - ");
-
-		select.appendColumnName(sb);
-		return sb.toString();
+		return label + " " + select.getColumnName();
 	}
 
 	@Override
@@ -62,19 +71,27 @@ public class SelectResultInfo extends ResultInfo {
 
 		StringBuilder sb = new StringBuilder();
 		String cqLabel = getCqConcept().defaultLabel(printSettings.getLocale());
+		final String selectLabel = select.getColumnName();
 
-		if (cqLabel != null) {
-			// If these labels differ, the user might changed the label of the concept in the frontend, or a TreeChild was posted
-			sb.append(cqLabel);
-			sb.append(" - ");
+		if (selectLabel.equals(cqLabel)) {
+			// If the default name of concept and select is the same, output only one
+			return selectLabel;
 		}
 
-		select.appendColumnName(sb);
+		if (cqLabel != null) {
+			// If these labels differ, the user might have changed the label of the concept in the frontend, or a TreeChild was posted
+			sb.append(cqLabel);
+			sb.append(" ");
+		}
+
+		sb.append(selectLabel);
+
 		return sb.toString();
 	}
 
 	@Override
-	public String toString(){
+	public String toString() {
 		return "SelectResultInfo[" + select.getName() + ", " + select.getResultType() + "]";
 	}
+
 }

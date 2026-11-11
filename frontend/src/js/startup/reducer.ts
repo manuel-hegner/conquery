@@ -15,16 +15,11 @@ const initialState: StartupStateT = {
   loading: false,
   error: null,
   config: {
-    version: "No version loaded",
+    versions: [],
     queryUpload: {
       ids: [],
     },
-    currency: {
-      prefix: "€",
-      thousandSeparator: ".",
-      decimalSeparator: ",",
-      decimalScale: 2,
-    },
+    currency: "EUR",
   },
 };
 

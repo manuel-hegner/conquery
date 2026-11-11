@@ -1,8 +1,7 @@
 package com.bakdata.conquery.models.query.filter.event;
 
 import java.util.Set;
-
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 
 import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.datasets.Table;
@@ -11,10 +10,12 @@ import com.bakdata.conquery.models.events.stores.root.StringStore;
 import com.bakdata.conquery.models.query.queryplan.filter.EventFilterNode;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.ToString;
 
 /**
  * Single events are filtered, and included if they start with a given prefix. Entity is only included if it has any event with prefix.
  */
+@ToString(callSuper = true, of = "column")
 public class PrefixTextFilterNode extends EventFilterNode<String> {
 
 	@NotNull
@@ -40,10 +41,8 @@ public class PrefixTextFilterNode extends EventFilterNode<String> {
 			return false;
 		}
 
-		final int id = store.getString(event);
-		String value = store.getElement(id);
+		final String value = store.getString(event);
 
-		//if performance is a problem we could find the filterValue once in the dictionary and then only check the values
 		return value.startsWith(filterValue);
 	}
 

@@ -1,87 +1,73 @@
-import styled from "@emotion/styled";
-import React, { FC } from "react";
+import { CheckIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useSelector } from "react-redux";
+import { tv } from "tailwind-variants";
 
-import type { ColumnDescription } from "../api/types";
-import DownloadButton from "../button/DownloadButton";
-import PreviewButton from "../button/PreviewButton";
+import type { ColumnDescription, ResultUrlWithLabel } from "../api/types";
+import type { StateT } from "../app/reducers";
 import { isEmpty } from "../common/helpers/commonHelper";
 import { exists } from "../common/helpers/exists";
-import FaIcon from "../icon/FaIcon";
+import { QueryResultHistoryButton } from "../entity-history/QueryResultHistoryButton";
+import PreviewButton from "../preview/PreviewButton";
+import { C1, C2 } from "../ui-components/Typography";
+import { canViewEntityPreview, canViewQueryPreview } from "../user/selectors";
+import DownloadResultsDropdownButton from "./DownloadResultsDropdownButton";
 
-const Root = styled("div")`
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-`;
+const root = tv({
+  base: ["flex items-center justify-end", "gap-[7px]"],
+});
 
-const Text = styled("p")`
-  margin: 0;
-  line-height: 1;
-  font-size: ${({ theme }) => theme.font.sm};
-`;
-
-const LgText = styled(Text)`
-  font-size: ${({ theme }) => theme.font.lg};
-  white-space: nowrap;
-`;
-
-const SxDownloadButton = styled(DownloadButton)`
-  margin-left: 10px;
-`;
-
-const SxPreviewButton = styled(PreviewButton)`
-  margin-left: 10px;
-`;
-
-const Bold = styled("span")`
-  font-weight: 700;
-`;
-
-interface PropsT {
-  resultUrls: string[];
-  resultCount?: number | null; // For forms, won't usually have a count
-  resultColumns?: ColumnDescription[] | null; // For forms, won't usually have resultColumns
-  queryType?: "CONCEPT_QUERY" | "SECONDARY_ID_QUERY";
-}
-
-const QueryResults: FC<PropsT> = ({
+const QueryResults = ({
+  resultLabel,
   resultUrls,
   resultCount,
   resultColumns,
   queryType,
+  previewAvailable,
+}: {
+  resultLabel: string;
+  resultUrls: ResultUrlWithLabel[];
+  resultCount?: number | null; // For forms, won't usually have a count
+  resultColumns?: ColumnDescription[] | null; // For forms, won't usually have resultColumns
+  queryType?: "CONCEPT_QUERY" | "SECONDARY_ID_QUERY";
+  previewAvailable?: boolean; // Backend decides, e.g. most forms have no preview
 }) => {
   const { t } = useTranslation();
-  const csvUrl = resultUrls.find((url) => url.endsWith("csv"));
+  const csvUrl = resultUrls.find(({ url }) => url.endsWith("csv"));
+  const canViewHistory = useSelector<StateT, boolean>(canViewEntityPreview);
+  const canViewPreview = useSelector<StateT, boolean>(canViewQueryPreview);
 
   return (
-    <Root>
+    <div className={root()}>
       {isEmpty(resultCount) ? (
-        <Text>
-          <FaIcon icon="check" left />
-          {t("queryRunner.endSuccess")}
-        </Text>
+        <div className="flex items-center gap-[10px]">
+          <CheckIcon />
+          <C2 as="span">{t("queryRunner.endSuccess")}</C2>
+        </div>
       ) : (
-        <LgText>
-          <Bold>{resultCount}</Bold>{" "}
-          {queryType === "SECONDARY_ID_QUERY"
-            ? t("queryRunner.resultCountSecondaryIdQuery")
-            : t("queryRunner.resultCount")}
-        </LgText>
+        <div className="whitespace-nowrap">
+          <C1>
+            <C1 as="span" strong>
+              {resultCount}
+            </C1>{" "}
+            {queryType === "SECONDARY_ID_QUERY"
+              ? t("queryRunner.resultCountSecondaryIdQuery")
+              : t("queryRunner.resultCount")}
+          </C1>
+        </div>
       )}
-      {!!csvUrl && exists(resultColumns) && (
-        <SxPreviewButton columns={resultColumns} url={csvUrl} />
+      {canViewPreview && previewAvailable && <PreviewButton />}
+      {!!csvUrl && canViewHistory && exists(resultColumns) && (
+        <QueryResultHistoryButton
+          columns={resultColumns}
+          url={csvUrl.url}
+          label={resultLabel}
+        />
       )}
-      {resultUrls.map((url) => {
-        const ending = url.split(".").reverse()[0];
-
-        return (
-          <SxDownloadButton key={url} frame url={url}>
-            {ending.toUpperCase()}
-          </SxDownloadButton>
-        );
-      })}
-    </Root>
+      {resultUrls.length > 0 && (
+        <DownloadResultsDropdownButton resultUrls={resultUrls} />
+      )}
+    </div>
   );
 };
 

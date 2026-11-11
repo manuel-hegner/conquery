@@ -1,60 +1,69 @@
-import styled from "@emotion/styled";
-import React, { FC } from "react";
-import type { WrappedFieldProps } from "redux-form";
+import { useCallback, useRef } from "react";
 
-import {
-  PREVIOUS_QUERY,
-  PREVIOUS_SECONDARY_ID_QUERY,
-} from "../../common/constants/dndTypes";
-import { exists } from "../../common/helpers/exists";
+import { DNDType } from "../../common/constants/dndTypes";
 import type { DragItemQuery } from "../../standard-query-editor/types";
-import InfoTooltip from "../../tooltip/InfoTooltip";
 import Dropzone from "../../ui-components/Dropzone";
-import Label from "../../ui-components/Label";
-import Optional from "../../ui-components/Optional";
+import { Label } from "../../ui-components/Label";
 
-import FormQueryResult from "./FormQueryResult";
+import ValidatedFormQueryResult from "./ValidatedFormQueryResult";
 
-const SxDropzone = styled(Dropzone)<{ centered?: boolean }>`
-  justify-content: ${({ centered }) => (centered ? "center" : "flex-start")};
-`;
+const DROP_TYPES = [
+  DNDType.PREVIOUS_QUERY,
+  DNDType.PREVIOUS_SECONDARY_ID_QUERY,
+];
 
-interface PropsT extends WrappedFieldProps {
+const FormQueryDropzone = ({
+  label,
+  tooltip,
+  dropzoneText,
+  className,
+  value,
+  onChange,
+}: {
   label: string;
   tooltip?: string;
-  optional?: boolean;
   dropzoneText: string;
   className?: string;
-}
-
-const FormQueryDropzone: FC<PropsT> = (props) => {
+  value: DragItemQuery | null;
+  onChange: (value: DragItemQuery | null) => void;
+}) => {
   const onDrop = (item: DragItemQuery) => {
-    props.input.onChange(item);
+    onChange(item);
   };
 
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const onInvalid = useCallback(() => {
+    // It would be better to call `setError` to register an error for the field,
+    // but that error won't persist when another `useController` call is made for that field
+    // during field registration, so we have to do something here that
+    // makes the field not pass the `validate` rule.
+    onChangeRef.current(null);
+  }, []);
+  const onDelete = useCallback(() => {
+    onChangeRef.current(null);
+  }, []);
+
   return (
-    <div className={props.className}>
-      <Label>
-        {props.optional && <Optional />}
-        {props.label}
-        {exists(props.tooltip) && <InfoTooltip text={props.tooltip} />}
+    <div className={className}>
+      <Label elementType="span" tooltip={tooltip}>
+        {label}
       </Label>
-      <SxDropzone<FC<DropzoneProps<DragItemQuery>>>
-        onDrop={onDrop}
-        acceptedDropTypes={[PREVIOUS_QUERY, PREVIOUS_SECONDARY_ID_QUERY]}
-        centered={!props.input.value}
+      <Dropzone
+        className="justify-start"
+        onDrop={(item) => onDrop(item as DragItemQuery)}
+        acceptedDropTypes={DROP_TYPES}
       >
-        {() =>
-          !props.input.value ? (
-            props.dropzoneText
-          ) : (
-            <FormQueryResult
-              queryResult={props.input.value}
-              onDelete={() => props.input.onChange(null)}
-            />
-          )
-        }
-      </SxDropzone>
+        {() => (
+          <ValidatedFormQueryResult
+            placeholder={dropzoneText}
+            queryResult={value || undefined}
+            onInvalid={onInvalid}
+            onDelete={onDelete}
+          />
+        )}
+      </Dropzone>
     </div>
   );
 };

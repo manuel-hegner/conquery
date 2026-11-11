@@ -1,5 +1,5 @@
-import React from "react";
-import { BrowserRouter as Router, Route, Switch } from "react-router-dom";
+import type { ReactNode } from "react";
+import { Route, BrowserRouter as Router, Routes } from "react-router";
 
 import {
   AuthTokenContextProvider,
@@ -9,35 +9,39 @@ import KeycloakProvider from "../authorization/KeycloakProvider";
 import LoginPage from "../authorization/LoginPage";
 import WithAuthToken from "../authorization/WithAuthToken";
 import { basename } from "../environment";
-import type { TabT } from "../pane/types";
 
+import { AboutProvider } from "./About";
 import App from "./App";
 
-interface PropsT {
-  rightTabs: TabT[];
-}
-
-const AppRouter = (props: PropsT) => {
+const ContextProviders = ({ children }: { children: ReactNode }) => {
   const authTokenContextValue = useAuthTokenContextValue();
 
   return (
     <AuthTokenContextProvider value={authTokenContextValue}>
       <KeycloakProvider>
-        <Router basename={basename}>
-          <Switch>
-            <Route path="/login" component={LoginPage} />
-            <Route
-              path="/*"
-              render={(routeProps) => (
-                <WithAuthToken {...routeProps}>
-                  <App {...props} />
-                </WithAuthToken>
-              )}
-            />
-          </Switch>
-        </Router>
+        <AboutProvider>{children}</AboutProvider>
       </KeycloakProvider>
     </AuthTokenContextProvider>
+  );
+};
+
+const AppRouter = () => {
+  return (
+    <Router basename={basename}>
+      <ContextProviders>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/*"
+            element={
+              <WithAuthToken>
+                <App />
+              </WithAuthToken>
+            }
+          />
+        </Routes>
+      </ContextProviders>
+    </Router>
   );
 };
 

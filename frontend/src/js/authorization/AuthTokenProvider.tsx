@@ -1,10 +1,11 @@
-import { createContext, useState } from "react";
+import { createContext, useCallback, useState } from "react";
+import { type Location, useLocation } from "react-router";
 
 import { isIDPEnabled } from "../environment";
 
-import { getStoredAuthToken } from "./helper";
+import { getStoredAuthToken, storeAuthToken } from "./helper";
 
-export interface AuthTokenContextValue {
+interface AuthTokenContextValue {
   authToken: string;
   setAuthToken: (token: string) => void;
 }
@@ -14,10 +15,33 @@ export const AuthTokenContext = createContext<AuthTokenContextValue>({
   setAuthToken: () => null,
 });
 
+const getInitialAuthToken = (location: Location): string => {
+  if (isIDPEnabled) {
+    return "";
+  }
+
+  // Store the token from the URL if it is present.
+  const { search } = location;
+  const params = new URLSearchParams(search);
+  const accessToken = params.get("access_token");
+  if (accessToken) {
+    storeAuthToken(accessToken);
+  }
+
+  return getStoredAuthToken() || "";
+};
+
 export const useAuthTokenContextValue = (): AuthTokenContextValue => {
-  const [authToken, setAuthToken] = useState<string>(
-    isIDPEnabled ? "" : getStoredAuthToken() || "",
+  const location = useLocation();
+
+  const [authToken, internalSetAuthToken] = useState<string>(
+    getInitialAuthToken(location),
   );
+
+  const setAuthToken = useCallback((token: string) => {
+    storeAuthToken(token);
+    internalSetAuthToken(token);
+  }, []);
 
   return { authToken, setAuthToken };
 };

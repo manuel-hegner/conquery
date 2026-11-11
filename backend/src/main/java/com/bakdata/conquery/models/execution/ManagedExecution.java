@@ -6,55 +6,53 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import jakarta.validation.constraints.NotNull;
 
-import javax.annotation.Nullable;
-import javax.validation.constraints.NotNull;
-import javax.ws.rs.core.UriBuilder;
-
-import com.bakdata.conquery.apiv1.ExecutionStatus;
-import com.bakdata.conquery.apiv1.FullExecutionStatus;
-import com.bakdata.conquery.apiv1.OverviewExecutionStatus;
+import com.bakdata.conquery.apiv1.execution.ExecutionStatus;
+import com.bakdata.conquery.apiv1.execution.FullExecutionStatus;
+import com.bakdata.conquery.apiv1.execution.OverviewExecutionStatus;
 import com.bakdata.conquery.apiv1.query.QueryDescription;
+import com.bakdata.conquery.apiv1.query.concept.specific.CQConcept;
+import com.bakdata.conquery.apiv1.query.concept.specific.external.CQExternal;
 import com.bakdata.conquery.io.cps.CPSBase;
-import com.bakdata.conquery.io.jackson.serializer.MetaIdRef;
-import com.bakdata.conquery.io.jackson.serializer.NsIdRef;
 import com.bakdata.conquery.io.storage.MetaStorage;
 import com.bakdata.conquery.models.auth.entities.Group;
+import com.bakdata.conquery.models.auth.entities.Subject;
 import com.bakdata.conquery.models.auth.entities.User;
 import com.bakdata.conquery.models.auth.permissions.Ability;
 import com.bakdata.conquery.models.auth.permissions.ConqueryPermission;
 import com.bakdata.conquery.models.auth.permissions.ExecutionPermission;
 import com.bakdata.conquery.models.config.ConqueryConfig;
-import com.bakdata.conquery.models.datasets.Dataset;
 import com.bakdata.conquery.models.datasets.concepts.Concept;
 import com.bakdata.conquery.models.datasets.concepts.ConceptElement;
 import com.bakdata.conquery.models.error.ConqueryErrorInfo;
 import com.bakdata.conquery.models.i18n.I18n;
-import com.bakdata.conquery.models.identifiable.IdentifiableImpl;
-import com.bakdata.conquery.models.identifiable.ids.NamespacedId;
-import com.bakdata.conquery.models.identifiable.ids.NamespacedIdentifiable;
+import com.bakdata.conquery.models.identifiable.MetaIdentifiable;
 import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import com.bakdata.conquery.models.identifiable.ids.specific.GroupId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ManagedExecutionId;
-import com.bakdata.conquery.models.messages.namespaces.WorkerMessage;
+import com.bakdata.conquery.models.identifiable.ids.specific.UserId;
 import com.bakdata.conquery.models.query.ExecutionManager;
 import com.bakdata.conquery.models.query.PrintSettings;
 import com.bakdata.conquery.models.query.Visitable;
-import com.bakdata.conquery.models.query.results.ShardResult;
 import com.bakdata.conquery.models.worker.DatasetRegistry;
 import com.bakdata.conquery.models.worker.Namespace;
 import com.bakdata.conquery.util.QueryUtils;
 import com.bakdata.conquery.util.QueryUtils.NamespacedIdentifiableCollector;
+import com.fasterxml.jackson.annotation.JacksonInject;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.OptBoolean;
 import com.google.common.base.Preconditions;
-import com.google.common.util.concurrent.Uninterruptibles;
+import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
@@ -66,65 +64,114 @@ import org.apache.shiro.authz.Permission;
 
 @Getter
 @Setter
-@ToString
 @Slf4j
 @CPSBase
-@NoArgsConstructor
 @JsonTypeInfo(use = JsonTypeInfo.Id.CUSTOM, property = "type")
-public abstract class ManagedExecution<R extends ShardResult> extends IdentifiableImpl<ManagedExecutionId> implements Taggable, Shareable, Labelable, Owned, Visitable {
+@EqualsAndHashCode(callSuper = false)
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@JsonIgnoreProperties("state")
+@ToString(onlyExplicitlyIncluded = true)
+public abstract class ManagedExecution extends MetaIdentifiable<ManagedExecutionId> implements Taggable, Shareable, Labelable, Owned, Visitable {
 
 	/**
-	 * Some unusual suffix. Its not too bad if someone actually uses this.
+	 * Some unusual suffix. It's not too bad if someone actually uses this.
 	 */
 	public static final String AUTO_LABEL_SUFFIX = "\t@§$";
 
-	@NsIdRef
-	private Dataset dataset;
+	@ToString.Include
+	private DatasetId dataset;
+	@ToString.Include
 	private UUID queryId;
+	@ToString.Include
 	private String label;
 
+	@ToString.Include
 	private LocalDateTime creationTime = LocalDateTime.now();
 
-	@Nullable
-	@MetaIdRef
-	private User owner;
+	@ToString.Include
+	private UserId owner;
 
 	@NotNull
+	@ToString.Include
 	private String[] tags = ArrayUtils.EMPTY_STRING_ARRAY;
+	@ToString.Include
 	private boolean shared = false;
 
-	private boolean machineGenerated;
+	// Most queries contain dates, and this retroactively creates a saner default than false for old queries.
+	@JsonProperty(defaultValue = "true")
+	private boolean containsDates;
 
+	@JsonAlias("machineGenerated")
+	@ToString.Include
+	private boolean system;
 
-	// we don't want to store or send query results or other result metadata
+	// TODO may transfer these to the ExecutionManager
+	@EqualsAndHashCode.Exclude
+	@ToString.Include
+	private LocalDateTime startTime;
+	@EqualsAndHashCode.Exclude
+	@ToString.Include
+	private LocalDateTime finishTime;
+	@EqualsAndHashCode.Exclude
+	@ToString.Include
+	private Float progress;
+
 	@JsonIgnore
-	private transient ExecutionState state = ExecutionState.NEW;
-	@JsonIgnore
-	private transient CountDownLatch execution;
-	@JsonIgnore
-	private transient LocalDateTime startTime;
-	@JsonIgnore
-	private transient LocalDateTime finishTime;
-	@JsonIgnore
+	@EqualsAndHashCode.Exclude
+	@ToString.Include
 	private transient ConqueryErrorInfo error;
 	@JsonIgnore
-	private transient Float progress;
-	@JsonIgnore
+	@EqualsAndHashCode.Exclude
 	private transient boolean initialized = false;
 
+	@JacksonInject(useInput = OptBoolean.FALSE)
+	@Setter
+	@Getter
 	@JsonIgnore
-	private transient ExecutionManager executionManager;
+	@EqualsAndHashCode.Exclude
+	private transient ConqueryConfig config;
+	@JacksonInject(useInput = OptBoolean.FALSE)
+	@Setter
+	@Getter(AccessLevel.PROTECTED)
+	@JsonIgnore
+	@NotNull
+	private transient MetaStorage metaStorage;
+
+	@JacksonInject(useInput = OptBoolean.FALSE)
+	@Setter
+	@Getter(AccessLevel.PROTECTED)
+	@JsonIgnore
+	@NotNull
+	private transient DatasetRegistry<?> datasetRegistry;
 
 
-	public ManagedExecution(User owner, Dataset dataset) {
+	public ManagedExecution(@NonNull UserId owner, @NonNull DatasetId dataset, MetaStorage metaStorage, DatasetRegistry<?> datasetRegistry, ConqueryConfig config) {
 		this.owner = owner;
 		this.dataset = dataset;
+		this.config = config;
+		this.datasetRegistry = datasetRegistry;
+		setMetaStorage(metaStorage);
+	}
+
+	private static boolean canSubjectExpand(Subject subject, QueryDescription query) {
+		NamespacedIdentifiableCollector namespacesIdCollector = new NamespacedIdentifiableCollector();
+		query.visit(namespacesIdCollector);
+
+		final Set<Concept<?>> concepts = namespacesIdCollector.getIdentifiables()
+															  .stream()
+															  .filter(ConceptElement.class::isInstance)
+															  .map(ConceptElement.class::cast)
+															  .<Concept<?>>map(ConceptElement::getConcept)
+															  .collect(Collectors.toSet());
+
+        return subject.isPermittedAll(concepts, Ability.READ);
 	}
 
 	/**
 	 * Executed right before execution submission.
 	 */
-	public void initExecutable(DatasetRegistry datasetRegistry, ConqueryConfig config) {
+	public final void initExecutable() {
+
 		synchronized (this) {
 			if (initialized) {
 				log.trace("Execution {} was already initialized", getId());
@@ -132,243 +179,38 @@ public abstract class ManagedExecution<R extends ShardResult> extends Identifiab
 			}
 			if (label == null) {
 				// IdMapper is not necessary here
-				label = makeAutoLabel(new PrintSettings(true, I18n.LOCALE.get(), datasetRegistry, config, null));
+				label = makeAutoLabel(new PrintSettings(true, I18n.LOCALE.get(), config, null, null));
 			}
 
-			executionManager = datasetRegistry.get(getDataset().getId()).getExecutionManager();
+			doInitExecutable();
 
-			doInitExecutable(datasetRegistry, config);
+			// This can be quite slow, so setting this in overview is not optimal for users with a lot of queries.
+			containsDates = containsDates(getSubmitted());
+
 			initialized = true;
 		}
 	}
 
-	protected abstract void doInitExecutable(DatasetRegistry namespaces, ConqueryConfig config);
-
-	/**
-	 * Returns the set of namespaces, this execution needs to be executed on.
-	 * The {@link ExecutionManager} then submits the queries to these namespaces.
-	 */
-	@JsonIgnore
-	public abstract Set<Namespace> getRequiredDatasets();
-
-
-	@Override
-	public ManagedExecutionId createId() {
-		if (queryId == null) {
-			queryId = UUID.randomUUID();
-		}
-		return new ManagedExecutionId(dataset.getId(), queryId);
-	}
-
-	/**
-	 * Fails the execution and log the occurred error.
-	 */
-	protected void fail(MetaStorage storage, ConqueryErrorInfo error) {
-		if (this.error != null && !this.error.equalsRegardingCodeAndMessage(error)) {
-			// Warn only again if the error is different (failed might by called per collected result)
-			log.warn("The execution [{}] failed again with:\n\t{}\n\tThe previous error was: {}", getId(), this.error, error);
-		}
-		else {
-			this.error = error;
-			// Log the error, so its id is atleast once in the logs
-			log.warn("The execution [{}] failed with:\n\t{}", this.getId(), this.error);
-		}
-
-		finish(storage, ExecutionState.FAILED);
-	}
-
-	public void start() {
-		synchronized (this) {
-			Preconditions.checkArgument(isInitialized(), "The execution must have been initialized first");
-
-			startTime = LocalDateTime.now();
-
-			setState(ExecutionState.RUNNING);
-			getExecutionManager().clearQueryResults(this);
-
-			execution = new CountDownLatch(1);
-		}
-	}
-
-	protected void finish(MetaStorage storage, ExecutionState executionState) {
-		if (getState() == ExecutionState.NEW) {
-			log.error("Query[{}] was never run.", getId());
-		}
-
-		synchronized (this) {
-			finishTime = LocalDateTime.now();
-			progress = null;
-			// Set execution state before acting on the latch to prevent a race condition
-			// Not sure if also the storage needs an update first
-			setState(executionState);
-			execution.countDown();
-
-			// No need to persist failed queries. (As they are most likely invalid)
-			if (getState() == ExecutionState.DONE) {
-				if (storage == null) {
-					log.warn("Not saving successful execution {} because no storage was provided", getId());
-					return;
-				}
-				storage.updateExecution(this);
-			}
-		}
-
-
-		log.info(
-				"{} {} {} within {}",
-				getState(),
-				queryId,
-				this.getClass().getSimpleName(),
-				getExecutionTime()
-		);
+	protected String makeAutoLabel(PrintSettings cfg) {
+		return makeDefaultLabel(cfg) + AUTO_LABEL_SUFFIX;
 	}
 
 	@JsonIgnore
-	public Duration getExecutionTime() {
-		return (startTime != null && finishTime != null) ? Duration.between(startTime, finishTime) : null;
+	public Namespace getNamespace() {
+		return datasetRegistry.get(getDataset());
 	}
 
-	/**
-	 * Blocks until a execution finished of the specified timeout is reached. Return immediately if the execution is not running
-	 */
-	public void awaitDone(int time, TimeUnit unit) {
-		if (getState() != ExecutionState.RUNNING) {
-			return;
-		}
-		Uninterruptibles.awaitUninterruptibly(execution, time, unit);
+	protected abstract void doInitExecutable();
+
+	private static boolean containsDates(QueryDescription query) {
+		return Visitable.stream(query)
+						.anyMatch(visitable ->
+										  switch (visitable) {
+											  case CQConcept cqConcept -> !cqConcept.isExcludeFromTimeAggregation();
+											  case CQExternal external -> external.containsDates();
+											  default -> false;
+										  });
 	}
-
-	public void setStatusBase(@NonNull User user, @NonNull ExecutionStatus status) {
-		status.setLabel(label == null ? queryId.toString() : getLabelWithoutAutoLabelSuffix());
-		status.setPristineLabel(label == null || queryId.toString().equals(label) || isAutoLabeled());
-		status.setId(getId());
-		status.setTags(tags);
-		status.setShared(shared);
-		status.setOwn(user.isOwner(this));
-		status.setCreatedAt(getCreationTime().atZone(ZoneId.systemDefault()));
-		status.setRequiredTime((startTime != null && finishTime != null) ? ChronoUnit.MILLIS.between(startTime, finishTime) : null);
-		status.setStartTime(startTime);
-		status.setFinishTime(finishTime);
-		status.setStatus(getState());
-		if (owner != null) {
-			status.setOwner(owner.getId());
-			status.setOwnerName(owner.getLabel());
-		}
-	}
-
-	/**
-	 * Renders a lightweight status with meta information about this query. Computation an size should be small for this.
-	 */
-	public OverviewExecutionStatus buildStatusOverview(UriBuilder url, User user) {
-		OverviewExecutionStatus status = new OverviewExecutionStatus();
-		setStatusBase(user, status);
-
-		return status;
-	}
-
-	/**
-	 * Renders an extensive status of this query (see {@link FullExecutionStatus}. The rendering can be computation intensive and can produce a large
-	 * object. The use  of the full status is only intended if a client requested specific information about this execution.
-	 */
-	public FullExecutionStatus buildStatusFull(@NonNull MetaStorage storage, User user, DatasetRegistry datasetRegistry, ConqueryConfig config) {
-
-		initExecutable(datasetRegistry, config);
-		FullExecutionStatus status = new FullExecutionStatus();
-		setStatusBase(user, status);
-
-		setAdditionalFieldsForStatusWithColumnDescription(storage, user, status, datasetRegistry);
-		setAdditionalFieldsForStatusWithSource(user, status);
-		setAdditionalFieldsForStatusWithGroups(storage, status);
-		setAvailableSecondaryIds(status);
-		status.setProgress(progress);
-
-
-		if (getState().equals(ExecutionState.FAILED) && error != null) {
-			// Use plain format here to have a uniform serialization.
-			status.setError(error.asPlain());
-		}
-
-		return status;
-	}
-
-	private void setAvailableSecondaryIds(FullExecutionStatus status) {
-		final QueryUtils.AvailableSecondaryIdCollector secondaryIdCollector = new QueryUtils.AvailableSecondaryIdCollector();
-
-		visit(secondaryIdCollector);
-
-		status.setAvailableSecondaryIds(secondaryIdCollector.getIds());
-	}
-
-	private void setAdditionalFieldsForStatusWithGroups(@NonNull MetaStorage storage, FullExecutionStatus status) {
-		/* Calculate which groups can see this query.
-		 * This usually is usually not done very often and should be reasonable fast, so don't cache this.
-		 */
-		List<GroupId> permittedGroups = new ArrayList<>();
-		for (Group group : storage.getAllGroups()) {
-			for (Permission perm : group.getPermissions()) {
-				if (perm.implies(createPermission(Ability.READ.asSet()))) {
-					permittedGroups.add(group.getId());
-					continue;
-				}
-			}
-		}
-
-		status.setGroups(permittedGroups);
-	}
-
-	protected void setAdditionalFieldsForStatusWithColumnDescription(@NonNull MetaStorage storage, User user, FullExecutionStatus status, DatasetRegistry datasetRegistry) {
-		// Implementation specific
-	}
-
-	/**
-	 * Sets additional fields of an {@link ExecutionStatus} when a more specific status is requested.
-	 */
-	protected void setAdditionalFieldsForStatusWithSource(User user, FullExecutionStatus status) {
-		QueryDescription query = getSubmitted();
-		NamespacedIdentifiableCollector namespacesIdCollector = new NamespacedIdentifiableCollector();
-		query.visit(namespacesIdCollector);
-
-		final Set<Concept> concepts = namespacesIdCollector.getIdentifiables()
-														   .stream()
-														   .filter(ConceptElement.class::isInstance)
-														   .map(ConceptElement.class::cast)
-														   .map(ConceptElement::getConcept)
-														   .collect(Collectors.toSet());
-
-		boolean canExpand = user.isPermittedAll(concepts, Ability.READ);
-
-		status.setCanExpand(canExpand);
-		status.setQuery(canExpand ? getSubmitted() : null);
-	}
-
-	public boolean isReadyToDownload(Map<DatasetId, Set<Ability>> datasetAbilities) {
-		if (getState() != ExecutionState.DONE) {
-			// No url for unfinished executions, quick return
-			return false;
-		}
-
-		//TODO this is no longer the case.
-
-		/* We cannot rely on checking this.dataset only for download permission because the actual execution might also fired queries on another dataset.
-		 * The member ManagedExecution.dataset only associates the execution with the dataset it was submitted to.
-		 */
-
-		return getUsedNamespacedIds().stream()
-									 .map(NamespacedIdentifiable::getDataset)
-									 .distinct()
-									 .allMatch((id) -> datasetAbilities.get(id.getId()).contains(Ability.DOWNLOAD));
-	}
-
-	/**
-	 * Gives all {@link NamespacedId}s that were required in the execution.
-	 *
-	 * @return A List of all {@link NamespacedId}s needed for the execution.
-	 */
-	@JsonIgnore
-	public abstract Set<NamespacedIdentifiable<?>> getUsedNamespacedIds();
-
-
-	public abstract void addResult(@NonNull MetaStorage storage, R result);
 
 	/**
 	 * Returns the {@link QueryDescription} that caused this {@link ManagedExecution}.
@@ -377,10 +219,113 @@ public abstract class ManagedExecution<R extends ShardResult> extends Identifiab
 	public abstract QueryDescription getSubmitted();
 
 	@JsonIgnore
-	public String getLabelWithoutAutoLabelSuffix() {
-		int idx;
-		if (label != null && (idx = label.lastIndexOf(AUTO_LABEL_SUFFIX)) != -1) {
+	protected abstract String makeDefaultLabel(PrintSettings cfg);
 
+	@Override
+	public ManagedExecutionId createId() {
+		if (queryId == null) {
+			queryId = UUID.randomUUID();
+		}
+		return new ManagedExecutionId(dataset, queryId);
+	}
+
+	/**
+	 * Fails the execution and log the occurred error.
+	 */
+	public void fail(ConqueryErrorInfo error) {
+		if (this.error != null && !this.error.equalsRegardingCodeAndMessage(error)) {
+			// Warn only again if the error is different (failed might be called per collected shard result)
+			log.warn("The execution [{}] failed again with:\n\t{}\n\tThe previous error was: {}", getId(), this.error, error);
+		}
+		else {
+			this.error = error;
+			// Log the error, so its id is at least once in the logs
+			log.warn("The execution [{}] failed with:\n\t{}", getId(), getError());
+		}
+
+		finish(ExecutionState.FAILED);
+	}
+
+	public synchronized void finish(ExecutionState executionState) {
+
+		// Modify state
+		finishTime = LocalDateTime.now();
+		progress = null;
+
+		// Set execution state before acting on the latch (to prevent a race condition - should not happen as the CachedStore uses softValues)
+		getExecutionManager().updateState(getId(), executionState);
+
+		// Persist state of this execution
+		getMetaStorage().updateExecution(this);
+
+		// Signal to waiting threads that the execution finished
+		getExecutionManager().clearBarrier(getId());
+
+		log.info("{} {} {} within {}", executionState, getId(), getClass().getSimpleName(), getExecutionTime());
+	}
+
+	@JsonIgnore
+	protected ExecutionManager getExecutionManager() {
+		return getNamespace().getExecutionManager();
+	}
+
+	@JsonIgnore
+	public Duration getExecutionTime() {
+		return (startTime != null && finishTime != null) ? Duration.between(startTime, finishTime) : null;
+	}
+
+	public void start() {
+		synchronized (this) {
+			Preconditions.checkArgument(isInitialized(), "The execution must have been initialized first");
+
+			if (getExecutionManager().isInfoPresent(getId())) {
+				Preconditions.checkArgument(getExecutionManager().getExecutionInfo(getId()).getExecutionState() != ExecutionState.RUNNING);
+			}
+
+			startTime = LocalDateTime.now();
+
+			getMetaStorage().updateExecution(this);
+		}
+	}
+
+	/**
+	 * Renders a lightweight status with meta information about this query.
+	 */
+	public OverviewExecutionStatus buildStatusOverview(Subject subject) {
+		OverviewExecutionStatus status = new OverviewExecutionStatus();
+		setStatusBase(subject, status);
+
+		return status;
+	}
+
+	public void setStatusBase(@NonNull Subject subject, @NonNull ExecutionStatus status) {
+		status.setLabel(label == null ? queryId.toString() : getLabelWithoutAutoLabelSuffix());
+		status.setPristineLabel(label == null || queryId.toString().equals(label) || isAutoLabeled());
+		status.setId(getId());
+		status.setTags(tags);
+		status.setShared(shared);
+		status.setOwn(subject.isOwner(this));
+		status.setCreatedAt(getCreationTime().atZone(ZoneId.systemDefault()));
+		status.setRequiredTime((startTime != null && finishTime != null) ? ChronoUnit.MILLIS.between(startTime, finishTime) : null);
+		status.setStartTime(startTime);
+		status.setFinishTime(finishTime);
+		status.setStatus(getState());
+		status.setContainsDates(containsDates);
+
+		if (owner != null) {
+			User user = owner.get();
+
+			if (user != null) {
+				status.setOwner(user.getId());
+				status.setOwnerName(user.getLabel());
+			}
+		}
+	}
+
+	@JsonIgnore
+	public String getLabelWithoutAutoLabelSuffix() {
+		final int idx;
+		if (label != null && (idx = label.lastIndexOf(AUTO_LABEL_SUFFIX)) != -1) {
 			return label.substring(0, idx);
 		}
 		return label;
@@ -392,22 +337,88 @@ public abstract class ManagedExecution<R extends ShardResult> extends Identifiab
 	}
 
 	@JsonIgnore
-	protected abstract String makeDefaultLabel(PrintSettings cfg);
+	public ExecutionState getState() {
+		return getExecutionManager().getState(getId());
+	}
 
-	protected String makeAutoLabel(PrintSettings cfg) {
-		return makeDefaultLabel(cfg) +  AUTO_LABEL_SUFFIX;
+	/**
+	 * Renders an extensive status of this query (see {@link FullExecutionStatus}). The rendering can be computation intensive and can produce a large
+	 * object. The use  of the full status is only intended if a client requested specific information about this execution.
+	 */
+	public FullExecutionStatus buildStatusFull(Subject subject, Namespace namespace) {
+
+		FullExecutionStatus status = new FullExecutionStatus();
+		setStatusFull(status, subject, namespace);
+
+		return status;
+	}
+
+	public void setStatusFull(FullExecutionStatus status, Subject subject, Namespace namespace) {
+		setStatusBase(subject, status);
+
+		setAdditionalStatusFields(subject, status);
+		setAdditionalFieldsForStatusWithSource(subject, status, namespace);
+		setAdditionalFieldsForStatusWithGroups(status);
+		setAvailableSecondaryIds(status);
+		status.setProgress(progress);
+
+
+		if (getState().equals(ExecutionState.FAILED) && error != null) {
+			// Use plain format here to have a uniform serialization.
+			status.setError(error.asPlain());
+		}
+	}
+
+	private void setAvailableSecondaryIds(FullExecutionStatus status) {
+		final QueryUtils.AvailableSecondaryIdCollector secondaryIdCollector = new QueryUtils.AvailableSecondaryIdCollector();
+
+		visit(secondaryIdCollector);
+		// TODO may work with ids directly here instead of resolving
+		status.setAvailableSecondaryIds(secondaryIdCollector.getIds());
+	}
+
+	private void setAdditionalFieldsForStatusWithGroups(FullExecutionStatus status) {
+		/* Calculate which groups can see this query.
+		 * This is usually not done very often and should be reasonable fast, so don't cache this.
+		 */
+		List<GroupId> permittedGroups = new ArrayList<>();
+
+		try (Stream<Group> allGroups = getMetaStorage().getAllGroups()) {
+			for (Group group : allGroups.toList()) {
+				for (Permission perm : group.getPermissions()) {
+					if (perm.implies(createPermission(Ability.READ.asSet()))) {
+						permittedGroups.add(group.getId());
+					}
+				}
+			}
+		}
+
+		status.setGroups(permittedGroups);
+	}
+
+	protected void setAdditionalStatusFields(Subject subject, FullExecutionStatus status) {
+		// Implementation specific
+	}
+
+	/**
+	 * Sets additional fields of an {@link ExecutionStatus} when a more specific status is requested.
+	 */
+	protected void setAdditionalFieldsForStatusWithSource(Subject subject, FullExecutionStatus status, Namespace namespace) {
+		QueryDescription query = getSubmitted();
+
+		status.setCanExpand(canSubjectExpand(subject, query));
+
+
+		status.setQuery(canSubjectExpand(subject, query) ? getSubmitted() : null);
+	}
+
+	@JsonIgnore
+	public boolean isReadyToDownload() {
+		return getState() == ExecutionState.DONE;
 	}
 
 	@Override
 	public ConqueryPermission createPermission(Set<Ability> abilities) {
 		return ExecutionPermission.onInstance(abilities, getId());
-	}
-
-	public abstract WorkerMessage createExecutionMessage();
-
-	public void reset() {
-		setState(ExecutionState.NEW);
-
-		executionManager.clearQueryResults(this);
 	}
 }

@@ -7,7 +7,7 @@ import { useLoadMe } from "../user/actions";
 
 import { useLoadConfig } from "./actions";
 
-export const useStartup = () => {
+export const useStartup = ({ ready }: { ready?: boolean }) => {
   const dispatch = useDispatch();
 
   const loadConfig = useLoadConfig();
@@ -15,9 +15,14 @@ export const useStartup = () => {
   const loadMe = useLoadMe();
 
   useEffect(() => {
-    dispatch(resetMessage());
-    loadConfig();
-    loadDatasets();
-    loadMe();
-  }, [dispatch]);
+    async function load() {
+      if (ready) {
+        dispatch(resetMessage());
+        await loadMe();
+        await loadConfig();
+        setTimeout(loadDatasets, 300);
+      }
+    }
+    load();
+  }, [dispatch, ready, loadConfig, loadDatasets, loadMe]);
 };

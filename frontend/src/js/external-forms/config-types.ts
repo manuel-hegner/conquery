@@ -1,4 +1,4 @@
-import { SelectorResultType } from "../api/types";
+import type { SelectorResultType } from "../api/types";
 
 /* ------------------------------ */
 
@@ -12,8 +12,9 @@ interface TranslatableString {
 
 export type Forms = Form[];
 
-export type FormField = Field | Tabs;
-export type NonFormField = Headline | Description;
+type NonFormField = Headline | Description;
+export type FormField = Field | Tabs | Group;
+export type FormFieldWithValue = Exclude<FormField, Group>;
 
 export type GeneralField = FormField | NonFormField;
 
@@ -22,9 +23,21 @@ export interface Form {
   title: TranslatableString; // Displayed
   fields: GeneralField[];
   description?: TranslatableString; // Displayed
+  manualUrl?: string;
 }
 
-interface Tabs {
+export interface Group {
+  type: "GROUP";
+  label?: TranslatableString;
+  description?: TranslatableString;
+  style?: {
+    display: "flex" | "grid";
+    gridColumns?: number;
+  };
+  fields: GeneralField[];
+}
+
+export interface Tabs {
   name: string; // Sent to backend API
   type: "TABS";
   tabs: Tab[];
@@ -47,17 +60,20 @@ type GREATER_THAN_ZERO_VALIDATION = "GREATER_THAN_ZERO";
 /* ------------------------------ */
 /* FIELDS AND THEIR VALIDATIONS */
 /* ------------------------------ */
-type Field =
+export type Field =
+  | DisclosureListField
   | CheckboxField
   | StringField
+  | TextareaField
   | NumberField
   | SelectField
   | DatasetSelectField
-  | MultiSelectField
   | ResultGroupField
-  | MultiResultGroupField
   | ConceptListField
+  | DateField
   | DateRangeField;
+// TODO: At some point, handle multi select as well
+// | MultiSelectField;
 
 interface CommonField {
   name: string; // Sent to backend API
@@ -67,9 +83,12 @@ interface CommonField {
 
 /* ------------------------------ */
 
-interface Headline {
+export interface Headline {
   type: "HEADLINE";
   label: TranslatableString;
+  style?: {
+    size?: "h1" /* default */ | "h2" | "h3";
+  };
 }
 
 /* ------------------------------ */
@@ -81,7 +100,18 @@ interface Description {
 
 /* ------------------------------ */
 
-type CheckboxField = CommonField & {
+export interface DisclosureListField extends CommonField {
+  type: "DISCLOSURE_LIST";
+  creatable?: boolean;
+  defaultOpen?: boolean;
+  createNewLabel?: TranslatableString;
+  fields: GeneralField[];
+  onlyOneOpenAtATime?: boolean;
+}
+
+/* ------------------------------ */
+
+export type CheckboxField = CommonField & {
   type: "CHECKBOX";
   defaultValue?: boolean; // Default: False
 };
@@ -89,15 +119,24 @@ type CheckboxField = CommonField & {
 /* ------------------------------ */
 
 type StringFieldValidation = NOT_EMPTY_VALIDATION;
-type StringField = CommonField & {
+export type StringField = CommonField & {
   type: "STRING";
   placeholder?: TranslatableString;
   defaultValue?: string; // Default: ""
-  style?: {
-    fullWidth?: boolean; // Default: False
-  };
-  pattern?: string; // Regex to validate, using double backslashes, e.g.: "^(?!-)\\\\d*$"
   validations?: StringFieldValidation[];
+};
+
+/* ------------------------------ */
+
+type TextareaFieldValidation = NOT_EMPTY_VALIDATION;
+export type TextareaField = CommonField & {
+  type: "TEXTAREA";
+  placeholder?: TranslatableString;
+  defaultValue?: string; // Default: ""
+  style?: {
+    rows?: number;
+  };
+  validations?: TextareaFieldValidation[];
 };
 
 /* ------------------------------ */
@@ -105,12 +144,11 @@ type StringField = CommonField & {
 type NumberFieldValidation =
   | NOT_EMPTY_VALIDATION
   | GREATER_THAN_ZERO_VALIDATION;
-type NumberField = CommonField & {
+export type NumberField = CommonField & {
   type: "NUMBER";
   defaultValue?: number; // Default: null
   placeholder?: TranslatableString;
-  pattern?: string; // Regex to validate, using double backslashes, e.g.: "^(?!-)\\\\d*$"
-  step?: string;
+  step?: string; // Default: any decimals; "1" for whole numbers
   min?: number;
   max?: number;
   validations?: NumberFieldValidation[];
@@ -124,30 +162,40 @@ type SelectOption = {
   value: SelectValue;
 };
 type SelectFieldValidation = NOT_EMPTY_VALIDATION;
-type SelectField = CommonField & {
+export type SelectField = CommonField & {
   type: "SELECT";
   options: SelectOption[];
   defaultValue?: SelectValue;
   validations?: SelectFieldValidation[];
 };
-type DatasetSelectField = CommonField & {
+export type DatasetSelectField = CommonField & {
   type: "DATASET_SELECT";
   validations?: SelectFieldValidation[];
 };
 
 /* ------------------------------ */
 
-type MultiSelectField = CommonField & {
-  type: "MULTI_SELECT";
-  options: SelectOption[];
-  defaultOption?: SelectValue;
-  validations?: SelectFieldValidation[];
+// TODO: At some point, handle multi select as well
+// type MultiSelectField = CommonField & {
+//   type: "MULTI_SELECT";
+//   options: SelectOption[];
+//   defaultValue?: SelectValue[];
+//   validations?: SelectFieldValidation[];
+// };
+
+/* ------------------------------ */
+
+type DateFieldValidation = NOT_EMPTY_VALIDATION;
+export type DateField = CommonField & {
+  type: "DATE";
+  defaultValue?: string; // "yyyy-MM-dd", default: null
+  validations?: DateFieldValidation[];
 };
 
 /* ------------------------------ */
 
 type DateRangeFieldValidation = NOT_EMPTY_VALIDATION;
-type DateRangeField = CommonField & {
+export type DateRangeField = CommonField & {
   type: "DATE_RANGE";
   validations?: DateRangeFieldValidation[];
 };
@@ -155,16 +203,8 @@ type DateRangeField = CommonField & {
 /* ------------------------------ */
 
 type ResultGroupFieldValidation = NOT_EMPTY_VALIDATION;
-type ResultGroupField = CommonField & {
+export type ResultGroupField = CommonField & {
   type: "RESULT_GROUP";
-  dropzoneLabel: TranslatableString;
-  validations?: ResultGroupFieldValidation[];
-};
-
-/* ------------------------------ */
-
-type MultiResultGroupField = CommonField & {
-  type: "MULTI_RESULT_GROUP";
   dropzoneLabel: TranslatableString;
   validations?: ResultGroupFieldValidation[];
 };
@@ -181,12 +221,13 @@ export interface ConceptListDefaults {
   connectors?: ConnectorDefault[];
 }
 type ConceptListFieldValidation = NOT_EMPTY_VALIDATION;
-type ConceptListField = CommonField & {
+export type ConceptListField = CommonField & {
   type: "CONCEPT_LIST";
   conceptDropzoneLabel?: TranslatableString;
   conceptColumnDropzoneLabel?: TranslatableString;
   rowPrefixField?: SelectField;
   isTwoDimensional?: boolean; // Default: False
+  hideCopyButton?: boolean;
   isSingle?: boolean; // Default: False
   defaults?: ConceptListDefaults;
   validations?: ConceptListFieldValidation[];

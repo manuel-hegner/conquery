@@ -1,51 +1,53 @@
 package com.bakdata.conquery.util.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.File;
-import java.net.ServerSocket;
-import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import jakarta.validation.Validator;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.core.UriBuilder;
 
-import javax.validation.Validator;
-import javax.ws.rs.client.Client;
-
-import com.bakdata.conquery.Conquery;
+import com.bakdata.conquery.commands.DistributedStandaloneCommand;
 import com.bakdata.conquery.commands.ShardNode;
 import com.bakdata.conquery.commands.StandaloneCommand;
 import com.bakdata.conquery.integration.IntegrationTests;
+import com.bakdata.conquery.integration.json.TestDataImporter;
+import com.bakdata.conquery.integration.sql.SqlStandaloneCommand;
+import com.bakdata.conquery.integration.sql.dialect.MockClock;
 import com.bakdata.conquery.io.storage.MetaStorage;
+import com.bakdata.conquery.mode.cluster.ClusterManager;
+import com.bakdata.conquery.mode.cluster.ClusterState;
+import com.bakdata.conquery.models.auth.AuthorizationController;
 import com.bakdata.conquery.models.auth.entities.User;
 import com.bakdata.conquery.models.config.ConqueryConfig;
-import com.bakdata.conquery.models.config.XodusStoreFactory;
-import com.bakdata.conquery.models.datasets.Dataset;
-import com.bakdata.conquery.models.execution.ExecutionState;
-import com.bakdata.conquery.models.execution.ManagedExecution;
 import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
+import com.bakdata.conquery.models.identifiable.ids.specific.UserId;
+import com.bakdata.conquery.models.query.ExecutionManager;
 import com.bakdata.conquery.models.worker.DatasetRegistry;
+import com.bakdata.conquery.models.worker.DistributedNamespace;
 import com.bakdata.conquery.models.worker.Namespace;
-import com.bakdata.conquery.util.Wait;
+import com.bakdata.conquery.resources.admin.rest.AdminDatasetProcessor;
+import com.bakdata.conquery.resources.admin.rest.AdminProcessor;
 import com.bakdata.conquery.util.io.Cloner;
-import com.google.common.util.concurrent.Uninterruptibles;
 import io.dropwizard.client.JerseyClientBuilder;
-import io.dropwizard.jetty.ConnectorFactory;
-import io.dropwizard.jetty.HttpConnectorFactory;
-import io.dropwizard.server.DefaultServerFactory;
+import io.dropwizard.core.cli.Command;
 import io.dropwizard.testing.DropwizardTestSupport;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
 import org.glassfish.jersey.client.ClientProperties;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
 /**
  * Represents the test instance of Conquery.
@@ -58,63 +60,38 @@ public class TestConquery {
 	private final File tmpDir;
 	private final ConqueryConfig config;
 	@Getter
+	private final TestDataImporter testDataImporter;
+	private final Set<StandaloneSupport> openSupports = new HashSet<>();
+	@Getter
 	private StandaloneCommand standaloneCommand;
 	@Getter
 	private DropwizardTestSupport<ConqueryConfig> dropwizard;
-	private Set<StandaloneSupport> openSupports = new HashSet<>();
 	@Getter
 	private Client client;
 
-	private AtomicBoolean started = new AtomicBoolean(false);
-
-	/**
-	 * Returns the extension context used by the beforeAll-callback.
-	 *
-	 * @return The context.
-	 */
-	@Getter
-	private ExtensionContext beforeAllContext;
 	// Initial user which is set before each test from the config.
+	@Getter
 	private User testUser;
 
 	@SneakyThrows
-	public static void configurePathsAndLogging(ConqueryConfig config, File tmpDir) {
+	public static void waitUntil(Supplier<Boolean> condition) {
+		final AtomicLong done = new AtomicLong();
 
-		config.setFailOnError(true);
-
-		XodusStoreFactory storageConfig = new XodusStoreFactory();
-		storageConfig.setDirectory(tmpDir.toPath());
-		config.setStorage(storageConfig);
-		config.getStandalone().setNumberOfShardNodes(2);
-		// configure logging
-		config.setLoggingFactory(new TestLoggingFactory());
-
-		config.getCluster().setEntityBucketSize(3);
-
-	}
-
-	@SneakyThrows
-	public static void configureRandomPorts(ConqueryConfig config) {
-
-		// set random open ports
-		for (ConnectorFactory con : CollectionUtils
-											.union(
-													((DefaultServerFactory) config.getServerFactory()).getAdminConnectors(),
-													((DefaultServerFactory) config.getServerFactory()).getApplicationConnectors()
-											)) {
-			try (ServerSocket s = new ServerSocket(0)) {
-				((HttpConnectorFactory) con).setPort(s.getLocalPort());
-			}
-		}
-		try (ServerSocket s = new ServerSocket(0)) {
-			config.getCluster().setPort(s.getLocalPort());
-		}
+		await().atMost(10, TimeUnit.SECONDS)
+			   .pollInterval(2, TimeUnit.MILLISECONDS)
+			   .until(() -> {
+				   if (!condition.get()) {
+					   return false;
+				   }
+				   else {
+					   return done.getAndIncrement() > 5;
+				   }
+			   });
 	}
 
 	public synchronized StandaloneSupport openDataset(DatasetId datasetId) {
 		try {
 			log.info("loading dataset");
-
 			return createSupport(datasetId, datasetId.getName());
 		}
 		catch (Exception e) {
@@ -123,46 +100,58 @@ public class TestConquery {
 	}
 
 	private synchronized StandaloneSupport createSupport(DatasetId datasetId, String name) {
-		DatasetRegistry datasets = standaloneCommand.getManager().getDatasetRegistry();
+		if (config.getSqlConnectorConfig().isEnabled()) {
+			return buildSupport(datasetId, name, StandaloneSupport.Mode.SQL);
+		}
+		return buildDistributedSupport(datasetId, name);
+	}
+
+	private StandaloneSupport buildSupport(DatasetId datasetId, String name, StandaloneSupport.Mode mode) {
+
+		DatasetRegistry<? extends Namespace> datasets = standaloneCommand.getManager().getDatasetRegistry();
 		Namespace ns = datasets.get(datasetId);
 
-		assertThat(datasets.getShardNodes()).hasSize(2);
-
 		// make tmp subdir and change cfg accordingly
-		File localTmpDir = new File(tmpDir, "tmp_" + name);
+		String safeFileName = name.replaceAll("\\W", "");
+		File localTmpDir = new File(tmpDir, "tmp_" + safeFileName);
 
 		if (!localTmpDir.exists()) {
-			if(!localTmpDir.mkdir()) {
-				throw new IllegalStateException("Could not create directory for Support");
+			if (!localTmpDir.mkdir()) {
+				throw new IllegalStateException("Could not create directory for Support:" + localTmpDir);
 			}
-		} else {
+		}
+		else {
 			log.info("Reusing existing folder {} for Support", localTmpDir.getPath());
 		}
 
-		ConqueryConfig localCfg = Cloner.clone(config, Map.of(Validator.class, standaloneCommand.getManager().getEnvironment().getValidator()), IntegrationTests.MAPPER);
-
+		ConqueryConfig
+				localCfg =
+				Cloner.clone(config, Map.of(Validator.class, standaloneCommand.getManagerNode().getEnvironment().getValidator()), IntegrationTests.MAPPER);
 
 		StandaloneSupport support = new StandaloneSupport(
+				mode,
 				this,
 				ns,
-				ns.getStorage().getDataset(),
+				ns.getStorage().getDataset().getId(),
 				localTmpDir,
 				localCfg,
-				standaloneCommand.getManager().getAdmin().getAdminProcessor(),
-				standaloneCommand.getManager().getAdmin().getAdminDatasetProcessor(),
 				// Getting the User from AuthorizationConfig
-				testUser
+				testDataImporter
 		);
 
-		Wait.builder()
-			.total(Duration.ofSeconds(5))
-			.stepTime(Duration.ofMillis(5))
-			.build()
-			.until(() -> ns.getWorkers().size() == ns.getNamespaces().getShardNodes().size());
-
-		support.waitUntilWorkDone();
 		openSupports.add(support);
 		return support;
+	}
+
+	private synchronized StandaloneSupport buildDistributedSupport(DatasetId datasetId, String name) {
+
+		ClusterManager manager = (ClusterManager) standaloneCommand.getManager();
+		ClusterState clusterState = manager.getConnectionManager().getClusterState();
+		assertThat(clusterState.getShardNodes()).hasSize(2);
+
+		waitUntil(() -> clusterState.getWorkerHandlers().get(datasetId).getWorkers().size() == clusterState.getShardNodes().size());
+
+		return buildSupport(datasetId, name, StandaloneSupport.Mode.WORKER);
 	}
 
 	public synchronized StandaloneSupport getSupport(String name) {
@@ -172,13 +161,57 @@ public class TestConquery {
 			if (count > 0) {
 				name += "[" + count + "]";
 			}
-			Dataset dataset = new Dataset(name);
-			standaloneCommand.getManager().getAdmin().getAdminDatasetProcessor().addDataset(dataset);
-			return createSupport(dataset.getId(), name);
+
+
+			testDataImporter.importDataset(getClient(), defaultAdminURIBuilder(), name);
+
+			// Little detour here, but this way we get the correctly initialized dataset id
+			DatasetId datasetId = getDatasetRegistry().get(new DatasetId(name)).getDataset().getId();
+
+			return createSupport(datasetId, name);
 		}
 		catch (Exception e) {
 			return fail("Failed to create a support for " + name, e);
 		}
+	}
+
+	public DatasetRegistry<?> getDatasetRegistry() {
+		return getStandaloneCommand().getManagerNode().getDatasetRegistry();
+	}
+
+	public UriBuilder defaultAdminURIBuilder() {
+		return UriBuilder.fromPath("admin")
+						 .host("localhost")
+						 .scheme("http")
+						 .port(dropwizard.getAdminPort());
+	}
+
+	@SneakyThrows
+	public void waitUntilWorkDone() {
+		log.trace("Waiting for jobs to finish");
+		waitUntil(() -> !isBusy());
+	}
+
+	private boolean isBusy() {
+		boolean busy;
+		busy = standaloneCommand.getManagerNode().getJobManager().isSlowWorkerBusy();
+
+		busy |= standaloneCommand.getManager().getDatasetRegistry().getNamespaces().stream()
+								 .map(Namespace::getExecutionManager)
+								 .anyMatch(ExecutionManager::hasRunningQueries);
+
+		for (Namespace namespace : standaloneCommand.getManagerNode().getDatasetRegistry().getNamespaces()) {
+			busy |= namespace.getJobManager().isSlowWorkerBusy();
+
+			if (namespace instanceof DistributedNamespace distributedNamespace) {
+				busy |= distributedNamespace.getWorkerHandler().hasPendingMessages();
+			}
+		}
+
+		for (ShardNode shard : standaloneCommand.getShardNodes()) {
+			busy |= shard.isBusy();
+		}
+		return busy;
 	}
 
 	@SneakyThrows
@@ -188,48 +221,67 @@ public class TestConquery {
 		openSupports.clear();
 	}
 
-
-
 	public void beforeAll() throws Exception {
-
-		log.info("Working in temporary directory {}", tmpDir);
-
+		log.debug("Working in temporary directory {}", tmpDir);
 
 		// define server
-		dropwizard = new DropwizardTestSupport<ConqueryConfig>(TestBootstrappingConquery.class, config, app -> {
-			standaloneCommand = new StandaloneCommand((Conquery) app);
-			return standaloneCommand;
-		});
+		dropwizard = new DropwizardTestSupport<>(TestBootstrappingConquery.class, config, app -> {
+			if (config.getSqlConnectorConfig().isEnabled()) {
+				standaloneCommand = new SqlStandaloneCommand();
+			}
+			else {
+				standaloneCommand = new DistributedStandaloneCommand();
+			}
+			standaloneCommand.setClock(MockClock.get());
+			return (Command) standaloneCommand;
+		}
+		);
 		// start server
 		dropwizard.before();
 
 		// create HTTP client for api tests
-		client = new JerseyClientBuilder(this.getDropwizard().getEnvironment())
-						 .withProperty(ClientProperties.CONNECT_TIMEOUT, 10000)
-						 .withProperty(ClientProperties.READ_TIMEOUT, 10000)
-						 .build("test client");
+		client = new JerseyClientBuilder(getDropwizard().getEnvironment())
+				.withProperty(ClientProperties.CONNECT_TIMEOUT, 10000)
+				.withProperty(ClientProperties.READ_TIMEOUT, 10000)
+				.build("test client");
+
+
+		// The test user is recreated after each test, in the storage, but its id stays the same.
+		// Here we register the client filter once for that test user id.
+		UserId testUserId = config.getAuthorizationRealms().getInitialUsers().getFirst().createId();
+		client.register(new ConqueryAuthenticationFilter(() -> getAuthorizationController().getConqueryTokenRealm().createTokenForUser(testUserId)));
+
+		testUser = getMetaStorage().getUser(testUserId);
 	}
 
-	public void afterAll() throws Exception {
+	public AuthorizationController getAuthorizationController() {
+		return getStandaloneCommand().getManagerNode().getAuthController();
+	}
+
+	public MetaStorage getMetaStorage() {
+		return getStandaloneCommand().getManagerNode().getMetaStorage();
+	}
+
+	public void afterAll() {
 		client.close();
 		dropwizard.after();
 		FileUtils.deleteQuietly(tmpDir);
 	}
 
-	public void afterEach() throws Exception {
+	public void afterEach() {
 		synchronized (openSupports) {
 			for (StandaloneSupport openSupport : openSupports) {
 				removeSupportDataset(openSupport);
 			}
 			openSupports.clear();
 		}
-		this.getStandaloneCommand().getManager().getStorage().clear();
+		getStandaloneCommand().getManagerNode().getMetaStorage().clear();
 		waitUntilWorkDone();
 	}
 
 	@SneakyThrows
 	public void removeSupportDataset(StandaloneSupport support) {
-		standaloneCommand.getManager().getDatasetRegistry().removeNamespace(support.getDataset().getId());
+		standaloneCommand.getManagerNode().getDatasetRegistry().removeNamespace(support.getDataset());
 	}
 
 	public void removeSupport(StandaloneSupport support) {
@@ -239,52 +291,36 @@ public class TestConquery {
 		}
 	}
 
-	public void waitUntilWorkDone() {
-		log.info("Waiting for jobs to finish");
-		//sample multiple times from the job queues to make sure we are done with everything and don't miss late arrivals
-		long started = System.nanoTime();
-		for (int i = 0; i < 5; i++) {
-			do {
-				Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
-
-				if(!isBusy()) {
-					break;
-				}
-
-
-				if (Duration.ofNanos(System.nanoTime() - started).toSeconds() > 10) {
-					started = System.nanoTime();
-					log.warn("waiting for done work for a long time");
-				}
-
-			} while (true);
-		}
-		log.trace("all jobs finished");
-	}
-
-	private boolean isBusy() {
-		boolean busy;
-		busy = standaloneCommand.getManager().getJobManager().isSlowWorkerBusy();
-		busy |= standaloneCommand.getManager()
-								 .getStorage()
-								 .getAllExecutions()
-								 .stream()
-								 .map(ManagedExecution::getState)
-								 .anyMatch(ExecutionState.RUNNING::equals);
-
-		for (Namespace namespace : standaloneCommand.getManager().getDatasetRegistry().getDatasets()) {
-			busy |= namespace.getJobManager().isSlowWorkerBusy();
-		}
-
-		for (ShardNode slave : standaloneCommand.getShardNodes()) {
-			busy |= slave.isBusy();
-		}
-		return busy;
-	}
-
 	public void beforeEach() {
-		final MetaStorage storage = standaloneCommand.getManager().getStorage();
-		testUser = standaloneCommand.getManager().getConfig().getAuthorizationRealms().getInitialUsers().get(0).createOrOverwriteUser(storage);
-		storage.updateUser(testUser);
+
+		// Because Shiro works with a static Security manager
+		getStandaloneCommand().getManagerNode().getAuthController().registerStaticSecurityManager();
+
+		// MetaStorage is cleared after each test, so we need to add the test user again
+		final MetaStorage storage = standaloneCommand.getManagerNode().getMetaStorage();
+		testUser = standaloneCommand.getManagerNode().getConfig().getAuthorizationRealms().getInitialUsers().getFirst().createOrOverwriteUser(storage);
+	}
+
+	public Validator getValidator() {
+		return getStandaloneCommand().getManagerNode().getValidator();
+	}
+
+	public List<ShardNode> getShardNodes() {
+		return getStandaloneCommand().getShardNodes();
+	}
+
+	public AdminProcessor getAdminProcessor() {
+		return standaloneCommand.getManagerNode().getAdmin().getAdminProcessor();
+	}
+
+	public AdminDatasetProcessor getAdminDatasetsProcessor() {
+		return standaloneCommand.getManagerNode().getAdmin().getAdminDatasetProcessor();
+	}
+
+	public UriBuilder defaultApiURIBuilder() {
+		return UriBuilder.fromPath("api")
+						 .host("localhost")
+						 .scheme("http")
+						 .port(dropwizard.getLocalPort());
 	}
 }

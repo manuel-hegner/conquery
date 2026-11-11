@@ -7,19 +7,19 @@ import com.bakdata.conquery.models.common.CDate;
 import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.externalservice.ResultType;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.aggregators.SingleColumnAggregator;
+import lombok.ToString;
 
 /**
  * Aggregator, returning the min duration in the column, relative to the end of date restriction.
  */
+@ToString(callSuper = true, of = "unit")
 public class DateDistanceAggregator extends SingleColumnAggregator<Long> {
 
+	private final ChronoUnit unit;
 	private LocalDate reference;
-	private ChronoUnit unit;
-
 	private long result = Long.MAX_VALUE;
 	private boolean hit;
 
@@ -36,8 +36,8 @@ public class DateDistanceAggregator extends SingleColumnAggregator<Long> {
 
 	@Override
 	public void nextTable(QueryExecutionContext ctx, Table currentTable) {
-		if(ctx.getDateRestriction().isAll() || ctx.getDateRestriction().isEmpty()){
-			reference = null;
+		if (CDate.isPositiveInfinity(ctx.getDateRestriction().getMaxValue()) || ctx.getDateRestriction().isEmpty()) {
+			reference = CDate.toLocalDate(ctx.getToday());
 		}
 		else {
 			reference = CDate.toLocalDate(ctx.getDateRestriction().getMaxValue());
@@ -50,26 +50,18 @@ public class DateDistanceAggregator extends SingleColumnAggregator<Long> {
 	}
 
 	@Override
-	public void acceptEvent(Bucket bucket, int event) {
-		if(reference == null) {
-			return;
-		}
-
-		if(!bucket.has(event, getColumn())) {
+	public void consumeEvent(Bucket bucket, int event) {
+		if (!bucket.has(event, getColumn())) {
 			return;
 		}
 
 		hit = true;
 
-		LocalDate date = CDate.toLocalDate(bucket.getDate(event, getColumn()));
+		final LocalDate date = CDate.toLocalDate(bucket.getDate(event, getColumn()));
 
 		final long between = unit.between(date, reference);
 
 		result = Math.min(result, between);
 	}
 
-	@Override
-	public ResultType getResultType() {
-		return ResultType.IntegerT.INSTANCE;
-	}
 }

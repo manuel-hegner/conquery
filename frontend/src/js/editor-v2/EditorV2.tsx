@@ -1,0 +1,468 @@
+import { createId } from "@paralleldrive/cuid2";
+import {
+  BanIcon,
+  CalendarIcon,
+  HourglassIcon,
+  Maximize2Icon,
+  RefreshCwIcon,
+  SquarePenIcon,
+  TrashIcon,
+  WaypointsIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useHotkeys } from "react-hotkeys-hook";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+import { useDatasetId } from "../dataset/selectors";
+import { nodeIsConceptQueryNode, useActiveState } from "../model/node";
+import { EmptyQueryEditorDropzone } from "../standard-query-editor/EmptyQueryEditorDropzone";
+import type {
+  DragItemConceptTreeNode,
+  DragItemQuery,
+} from "../standard-query-editor/types";
+import { Button } from "../ui-components/Button";
+import { ConfirmMenu } from "../ui-components/ConfirmMenu";
+import Dropzone from "../ui-components/Dropzone";
+import { ToggleButton } from "../ui-components/ToggleButton";
+import { Tooltip, TooltipTrigger } from "../ui-components/Tooltip";
+import { EDITOR_DROP_TYPES, HOTKEYS } from "./config";
+import { useConnectorEditing } from "./connector-update/useConnectorRotation";
+import { DateModal } from "./date-restriction/DateModal";
+import { useDateEditing } from "./date-restriction/useDateEditing";
+import { Connector, Grid } from "./EditorLayout";
+import { EditorV2QueryRunner } from "./EditorV2QueryRunner";
+import { useExpandQuery } from "./expand/useExpandQuery";
+import { KeyboardShortcutTooltip } from "./KeyboardShortcutTooltip";
+import { useNegationEditing } from "./negation/useNegationEditing";
+import { EditorV2QueryNodeEditor } from "./query-node-edit/EditorV2QueryNodeEditor";
+import { useQueryNodeEditing } from "./query-node-edit/useQueryNodeEditing";
+import { TreeNode } from "./TreeNode";
+import { TimeConnectionModal } from "./time-connection/TimeConnectionModal";
+import { useTimeConnectionEditing } from "./time-connection/useTimeConnectionEditing";
+import type { Tree, TreeChildrenTime } from "./types";
+import { findNodeById, useGetTranslatedConnection } from "./util";
+
+const main = tv({
+  base: ["pt-2 pb-[10px] px-[10px]", "flex flex-col", "gap-[10px]"],
+});
+
+const useEditorState = () => {
+  const [tree, setTree] = useState<Tree | undefined>(undefined);
+  const [selectedNodeId, setSelectedNodeId] = useState<Tree["id"] | undefined>(
+    undefined,
+  );
+  const selectedNode = useMemo(() => {
+    if (!tree || !selectedNodeId) {
+      return undefined;
+    }
+    return findNodeById(tree, selectedNodeId);
+  }, [tree, selectedNodeId]);
+
+  const { active: selectedNodeActive } = useActiveState(selectedNode?.data);
+
+  const onReset = useCallback(() => {
+    setTree(undefined);
+  }, []);
+
+  const updateTreeNode = useCallback(
+    (id: string, update: (node: Tree) => void) => {
+      const newTree = JSON.parse(JSON.stringify(tree));
+      const node = findNodeById(newTree, id);
+      if (node) {
+        update(node);
+        setTree(newTree);
+      }
+    },
+    [tree],
+  );
+
+  return {
+    tree,
+    setTree,
+    updateTreeNode,
+    onReset,
+    selectedNode,
+    selectedNodeActive,
+    setSelectedNodeId,
+  };
+};
+
+const useResetOnDatasetChange = (onReset: () => void) => {
+  const datasetId = useDatasetId();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset whenever the dataset changes
+  useEffect(() => {
+    onReset();
+  }, [datasetId, onReset]);
+};
+
+export function EditorV2({
+  featureDates,
+  featureNegate,
+  featureExpand,
+  featureConnectorRotate,
+  featureQueryNodeEdit,
+  featureContentInfos,
+  featureTimebasedQueries,
+}: {
+  featureDates: boolean;
+  featureNegate: boolean;
+  featureExpand: boolean;
+  featureConnectorRotate: boolean;
+  featureQueryNodeEdit: boolean;
+  featureContentInfos: boolean;
+  featureTimebasedQueries: boolean;
+}) {
+  const { t } = useTranslation();
+  const {
+    tree,
+    setTree,
+    updateTreeNode,
+    onReset,
+    selectedNode,
+    selectedNodeActive,
+    setSelectedNodeId,
+  } = useEditorState();
+
+  useResetOnDatasetChange(onReset);
+
+  const onFlip = useCallback(() => {
+    if (!selectedNode?.children) return;
+
+    updateTreeNode(selectedNode.id, (node) => {
+      if (!node.children) return;
+
+      node.children.direction =
+        node.children.direction === "horizontal" ? "vertical" : "horizontal";
+    });
+  }, [selectedNode, updateTreeNode]);
+
+  const onDelete = useCallback(() => {
+    if (!selectedNode) return;
+
+    if (selectedNode.parentId === undefined) {
+      setTree(undefined);
+    } else {
+      updateTreeNode(selectedNode.parentId, (parent) => {
+        if (!parent.children) return;
+
+        parent.children.items = parent.children.items.filter(
+          (item) => item.id !== selectedNode.id,
+        );
+
+        if (parent.children.items.length === 1) {
+          const child = parent.children.items[0];
+          parent.id = child.id;
+          parent.children = child.children;
+          parent.data = child.data;
+          parent.dates ||= child.dates;
+          parent.negation ||= child.negation;
+        }
+      });
+    }
+  }, [selectedNode, setTree, updateTreeNode]);
+
+  useHotkeys(HOTKEYS.delete.keyname, onDelete, [onDelete]);
+  useHotkeys(HOTKEYS.flip.keyname, onFlip, [onFlip]);
+  useHotkeys(HOTKEYS.reset.keyname, onReset, [onReset]);
+
+  const { canExpand, onExpand } = useExpandQuery({
+    enabled: featureExpand,
+    hotkey: "x",
+    updateTreeNode,
+    selectedNode,
+    setSelectedNodeId,
+    tree,
+  });
+
+  const { showModal, headline, onOpen, onClose } = useDateEditing({
+    enabled: featureDates,
+    hotkey: "d",
+    selectedNode,
+  });
+
+  const { onNegateClick } = useNegationEditing({
+    enabled: featureNegate,
+    hotkey: HOTKEYS.negate.keyname,
+    selectedNode,
+    updateTreeNode,
+  });
+
+  const { onRotateConnector } = useConnectorEditing({
+    enabled: featureConnectorRotate,
+    timebasedQueriesEnabled: featureTimebasedQueries,
+    hotkey: HOTKEYS.rotateConnector.keyname,
+    selectedNode,
+    updateTreeNode,
+  });
+
+  const {
+    showModal: showTimeModal,
+    onOpen: onOpenTimeModal,
+    onClose: onCloseTimeModal,
+  } = useTimeConnectionEditing({
+    enabled: featureTimebasedQueries,
+    hotkey: HOTKEYS.editTimeConnection.keyname,
+    selectedNode,
+  });
+
+  const {
+    showModal: showQueryNodeEditor,
+    onOpen: onOpenQueryNodeEditor,
+    onClose: onCloseQueryNodeEditor,
+  } = useQueryNodeEditing({
+    enabled: featureQueryNodeEdit,
+    hotkey: HOTKEYS.editQueryNode.keyname,
+    selectedNode,
+  });
+
+  const getTranslatedConnection = useGetTranslatedConnection();
+  const relevantConnection =
+    selectedNode?.children?.connection ||
+    (tree && selectedNode?.parentId
+      ? findNodeById(tree, selectedNode.parentId)?.children?.connection ||
+        undefined
+      : undefined);
+
+  const connection = getTranslatedConnection(relevantConnection);
+
+  const onChangeData = useCallback(
+    (data: DragItemConceptTreeNode) => {
+      if (!selectedNode) return;
+      updateTreeNode(selectedNode.id, (node) => {
+        node.data = data;
+      });
+    },
+    [selectedNode, updateTreeNode],
+  );
+
+  return (
+    <div className="grid grid-rows-[minmax(0,1fr)_auto]">
+      <div className={main()}>
+        {showQueryNodeEditor &&
+          selectedNode?.data &&
+          nodeIsConceptQueryNode(selectedNode.data) && (
+            <EditorV2QueryNodeEditor
+              onClose={onCloseQueryNodeEditor}
+              node={selectedNode.data}
+              onChange={onChangeData}
+            />
+          )}
+        {showModal && selectedNode && (
+          <DateModal
+            onClose={onClose}
+            headline={headline}
+            dateRange={selectedNode.dates?.restriction}
+            excludeFromDates={selectedNode.dates?.excluded}
+            setExcludeFromDates={(excluded) => {
+              updateTreeNode(selectedNode.id, (node) => {
+                if (!node.dates) node.dates = {};
+                node.dates.excluded = excluded;
+              });
+            }}
+            onResetDates={() =>
+              updateTreeNode(selectedNode.id, (node) => {
+                if (!node.dates) return;
+                node.dates.restriction = undefined;
+              })
+            }
+            setDateRange={(dateRange) => {
+              updateTreeNode(selectedNode.id, (node) => {
+                if (!node.dates) node.dates = {};
+                node.dates.restriction = dateRange;
+              });
+            }}
+          />
+        )}
+        {showTimeModal && selectedNode && (
+          <TimeConnectionModal
+            onClose={onCloseTimeModal}
+            conditions={selectedNode.children as TreeChildrenTime}
+            onChange={(nodeChildren) => {
+              updateTreeNode(selectedNode.id, (node) => {
+                node.children = nodeChildren;
+              });
+            }}
+          />
+        )}
+        {tree && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              {featureQueryNodeEdit && selectedNode && (
+                <KeyboardShortcutTooltip
+                  keyname={HOTKEYS.editQueryNode.keyname}
+                >
+                  <ToggleButton
+                    intent="tertiary"
+                    isDisabled={
+                      !selectedNode?.data ||
+                      !nodeIsConceptQueryNode(selectedNode.data)
+                    }
+                    isSelected={selectedNodeActive}
+                    onChange={() => {
+                      onOpenQueryNodeEditor();
+                    }}
+                  >
+                    <SquarePenIcon />
+                    {t("editorV2.edit")}
+                  </ToggleButton>
+                </KeyboardShortcutTooltip>
+              )}
+              {featureDates && selectedNode && (
+                <KeyboardShortcutTooltip keyname={HOTKEYS.editDates.keyname}>
+                  <ToggleButton
+                    intent="tertiary"
+                    isSelected={!!selectedNode.dates?.restriction}
+                    onChange={() => {
+                      onOpen();
+                    }}
+                  >
+                    <CalendarIcon />
+                    {t("editorV2.dates")}
+                  </ToggleButton>
+                </KeyboardShortcutTooltip>
+              )}
+              {featureNegate && selectedNode && (
+                <KeyboardShortcutTooltip keyname={HOTKEYS.negate.keyname}>
+                  <ToggleButton
+                    intent="tertiary"
+                    highlight="danger"
+                    isSelected={!!selectedNode.negation}
+                    onChange={onNegateClick}
+                  >
+                    <BanIcon />
+                    {t("editorV2.negate")}
+                  </ToggleButton>
+                </KeyboardShortcutTooltip>
+              )}
+              {featureConnectorRotate && selectedNode && connection && (
+                <KeyboardShortcutTooltip
+                  keyname={HOTKEYS.rotateConnector.keyname}
+                >
+                  <Button
+                    intent="tertiary"
+                    isDisabled={!selectedNode?.children}
+                    onPress={() => {
+                      onRotateConnector();
+                    }}
+                  >
+                    <WaypointsIcon />
+                    <Connector>{connection}</Connector>
+                  </Button>
+                </KeyboardShortcutTooltip>
+              )}
+              {selectedNode?.children?.connection === "time" && (
+                <KeyboardShortcutTooltip
+                  keyname={HOTKEYS.editTimeConnection.keyname}
+                >
+                  <Button
+                    intent="tertiary"
+                    onPress={() => {
+                      onOpenTimeModal();
+                    }}
+                  >
+                    <HourglassIcon />
+                    <span>{t("editorV2.timeConnection")}</span>
+                  </Button>
+                </KeyboardShortcutTooltip>
+              )}
+              {canExpand && (
+                <KeyboardShortcutTooltip keyname={HOTKEYS.expand.keyname}>
+                  <Button
+                    intent="tertiary"
+                    onPress={() => {
+                      onExpand();
+                    }}
+                  >
+                    <Maximize2Icon />
+                    {t("editorV2.expand")}
+                  </Button>
+                </KeyboardShortcutTooltip>
+              )}
+            </div>
+            <div className="flex items-center">
+              {selectedNode && (
+                <KeyboardShortcutTooltip keyname={HOTKEYS.flip.keyname}>
+                  <Button
+                    intent="tertiary"
+                    isDisabled={!selectedNode?.children}
+                    onPress={() => {
+                      onFlip();
+                    }}
+                  >
+                    <RefreshCwIcon />
+                    {t("editorV2.flip")}
+                  </Button>
+                </KeyboardShortcutTooltip>
+              )}
+              {selectedNode && (
+                <KeyboardShortcutTooltip
+                  keyname={HOTKEYS.delete.keyname.join(" | ")}
+                >
+                  <Button
+                    intent="tertiary"
+                    onPress={() => {
+                      onDelete();
+                    }}
+                  >
+                    <TrashIcon />
+                    {t("editorV2.delete")}
+                  </Button>
+                </KeyboardShortcutTooltip>
+              )}
+              <div className="ml-5">
+                <TooltipTrigger>
+                  <ConfirmMenu
+                    onConfirm={onReset}
+                    confirmationText={t("editorV2.clearConfirm")}
+                  >
+                    <Button aria-label={t("editorV2.clear")} intent="tertiary">
+                      <TrashIcon />
+                    </Button>
+                  </ConfirmMenu>
+                  <Tooltip>{t("editorV2.clear")}</Tooltip>
+                </TooltipTrigger>
+              </div>
+            </div>
+          </div>
+        )}
+        <Grid
+          onClick={() => {
+            if (!selectedNode || showModal) return;
+            setSelectedNodeId(undefined);
+          }}
+        >
+          {tree ? (
+            <TreeNode
+              tree={tree}
+              updateTreeNode={updateTreeNode}
+              selectedNode={selectedNode}
+              setSelectedNodeId={setSelectedNodeId}
+              droppable={{ h: true, v: true }}
+              featureContentInfos={featureContentInfos}
+              onOpenQueryNodeEditor={onOpenQueryNodeEditor}
+              onOpenTimeModal={onOpenTimeModal}
+              onRotateConnector={onRotateConnector}
+            />
+          ) : (
+            <Dropzone
+              className="h-full w-full"
+              onDrop={(item) => {
+                const id = createId();
+                setTree({
+                  id,
+                  data: item as DragItemConceptTreeNode | DragItemQuery,
+                });
+                setSelectedNodeId(id);
+              }}
+              acceptedDropTypes={EDITOR_DROP_TYPES}
+            >
+              {() => <EmptyQueryEditorDropzone />}
+            </Dropzone>
+          )}
+        </Grid>
+      </div>
+
+      <EditorV2QueryRunner query={{ tree }} />
+    </div>
+  );
+}

@@ -6,16 +6,17 @@ import java.time.temporal.IsoFields;
 import com.bakdata.conquery.models.common.CDate;
 import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.externalservice.ResultType;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.aggregators.SingleColumnAggregator;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
+import lombok.ToString;
 
 /**
  * Count the number of distinct quarters of the related events. Implementation is specific for LocalDates
  */
+@ToString(callSuper = true, onlyExplicitlyIncluded = true)
 public class CountQuartersOfDatesAggregator extends SingleColumnAggregator<Long> {
 
 	private final IntSet quarters = new IntOpenHashSet();
@@ -30,7 +31,7 @@ public class CountQuartersOfDatesAggregator extends SingleColumnAggregator<Long>
 	}
 
 	@Override
-	public void acceptEvent(Bucket bucket, int event) {
+	public void consumeEvent(Bucket bucket, int event) {
 		if (!bucket.has(event, getColumn())) {
 			return;
 		}
@@ -44,8 +45,4 @@ public class CountQuartersOfDatesAggregator extends SingleColumnAggregator<Long>
 		return quarters.isEmpty() ? null : (long) quarters.size();
 	}
 
-	@Override
-	public ResultType getResultType() {
-		return ResultType.IntegerT.INSTANCE;
-	}
 }

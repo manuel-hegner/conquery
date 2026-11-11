@@ -1,31 +1,33 @@
-import styled from "@emotion/styled";
-import React from "react";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+import { Link } from "../ui-components/Link";
+import { C2 } from "../ui-components/Typography";
 
-const Root = styled("div")`
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-`;
-
-const Description = styled("p")`
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.md};
-  border-left: 4px solid ${({ theme }) => theme.col.blueGrayDark};
-  padding-left: 10px;
-`;
+const root = tv({
+  base: ["flex flex-col items-start", "w-full", "gap-2"],
+});
 
 interface Props {
   description: string;
   className?: string;
+  manualUrl?: string;
 }
 
-const FormHeader = ({ className, description }: Props) => {
+const FormHeader = ({
+  className,
+  description: descriptionText,
+  manualUrl,
+}: Props) => {
+  const { t } = useTranslation();
   return (
-    <Root className={className}>
-      <Description>{description}</Description>
-    </Root>
+    <div className={root({ className })}>
+      <C2>{descriptionText}</C2>
+      {manualUrl && (
+        <Link href={manualUrl} external>
+          {t("externalForms.manualButton")}
+        </Link>
+      )}
+    </div>
   );
 };
 

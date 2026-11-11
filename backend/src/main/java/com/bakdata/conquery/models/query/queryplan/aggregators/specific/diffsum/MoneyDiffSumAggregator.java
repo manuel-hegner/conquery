@@ -1,23 +1,28 @@
 package com.bakdata.conquery.models.query.queryplan.aggregators.specific.diffsum;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+
 import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.externalservice.ResultType;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.aggregators.ColumnAggregator;
 import lombok.Getter;
+import lombok.ToString;
 
 /**
  * Aggregator summing over {@code addendColumn} and subtracting over {@code subtrahendColumn}, for money columns.
  */
-public class MoneyDiffSumAggregator extends ColumnAggregator<Long> {
+@ToString(of = {"addendColumn", "subtrahendColumn"})
+public class MoneyDiffSumAggregator extends ColumnAggregator<BigDecimal> {
 
 	@Getter
 	private final Column addendColumn;
 	@Getter
 	private final Column subtrahendColumn;
-	private long sum;
+	private BigDecimal sum;
 	private boolean hit;
 
 	public MoneyDiffSumAggregator(Column addend, Column subtrahend) {
@@ -28,17 +33,22 @@ public class MoneyDiffSumAggregator extends ColumnAggregator<Long> {
 	@Override
 	public void init(Entity entity, QueryExecutionContext context) {
 		hit = false;
-		sum = 0;
+		sum = BigDecimal.ZERO;
 	}
 
 
 	@Override
-	public Column[] getRequiredColumns() {
-		return new Column[]{getAddendColumn(), getSubtrahendColumn()};
+	public List<Column> getRequiredColumns() {
+		final List<Column> out = new ArrayList<>();
+
+		out.add(getAddendColumn());
+		out.add(getSubtrahendColumn());
+
+		return out;
 	}
 
 	@Override
-	public void acceptEvent(Bucket bucket, int event) {
+	public void consumeEvent(Bucket bucket, int event) {
 
 		if (!bucket.has(event, getAddendColumn()) && !bucket.has(event, getSubtrahendColumn())) {
 			return;
@@ -46,20 +56,16 @@ public class MoneyDiffSumAggregator extends ColumnAggregator<Long> {
 
 		hit = true;
 
-		long addend = bucket.has(event, getAddendColumn()) ? bucket.getMoney(event, getAddendColumn()) : 0;
+		final BigDecimal addend = bucket.has(event, getAddendColumn()) ? bucket.getMoney(event, getAddendColumn()) : BigDecimal.ZERO;
 
-		long subtrahend = bucket.has(event, getSubtrahendColumn()) ? bucket.getMoney(event, getSubtrahendColumn()) : 0;
+		final BigDecimal subtrahend = bucket.has(event, getSubtrahendColumn()) ? bucket.getMoney(event, getSubtrahendColumn()) : BigDecimal.ZERO;
 
-		sum = sum + addend - subtrahend;
+		sum = sum.add(addend).subtract(subtrahend);
 	}
 
 	@Override
-	public Long createAggregationResult() {
+	public BigDecimal createAggregationResult() {
 		return hit ? sum : null;
 	}
-	
-	@Override
-	public ResultType getResultType() {
-		return ResultType.MoneyT.INSTANCE;
-	}
+
 }

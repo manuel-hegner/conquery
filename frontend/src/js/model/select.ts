@@ -5,17 +5,15 @@ import type {
   TableWithFilterValueT,
 } from "../standard-query-editor/types";
 
-export function objectHasSelectedSelects(
+import type { NodeResetConfig } from "./node";
+
+export function objectHasNonDefaultSelects(
   obj: ConceptQueryNodeType | TableWithFilterValueT,
 ) {
-  return (
-    obj &&
-    obj.selects &&
-    obj.selects.some(
-      (select) =>
-        (select.selected && !select.default) ||
-        (!select.selected && !!select.default),
-    )
+  return obj?.selects?.some(
+    (select) =>
+      (select.selected && !select.default) ||
+      (!select.selected && !!select.default),
   );
 }
 
@@ -25,15 +23,6 @@ export function sortSelects(selects: SelectorT[]) {
     .sort((a, b) => (a.label < b.label ? -1 : 1));
 }
 
-const withDefaultSelect = (select: SelectorT) => ({
-  ...select,
-  selected: !!select.default,
-});
-
-export const selectsWithDefaults = (
-  selects?: SelectorT[],
-): SelectedSelectorT[] => (selects ? selects.map(withDefaultSelect) : []);
-
 function selectTypesMatch(
   resultType1: SelectorResultType,
   resultType2: SelectorResultType,
@@ -41,8 +30,8 @@ function selectTypesMatch(
   if (
     resultType1.type === "LIST" &&
     resultType2.type === "LIST" &&
-    !!resultType1.elementType &&
-    !!resultType2.elementType
+    resultType1.elementType &&
+    resultType2.elementType
   ) {
     return resultType1.elementType.type === resultType2.elementType.type;
   }
@@ -50,19 +39,43 @@ function selectTypesMatch(
   return resultType1.type === resultType2.type;
 }
 
-export function selectIsWithinTypes(
-  select: SelectorT,
-  types: SelectorResultType[],
-) {
+function selectIsWithinTypes(select: SelectorT, types: SelectorResultType[]) {
   return types.some((selectType) =>
     selectTypesMatch(selectType, select.resultType),
   );
 }
 
+export interface SelectConfig {
+  blocklistedSelects?: SelectorResultType[];
+  allowlistedSelects?: SelectorResultType[];
+}
+
 export const isSelectDisabled = (
   select: SelectorT,
-  blocklistedSelects?: SelectorResultType[],
-  allowlistedSelects?: SelectorResultType[],
+  { blocklistedSelects, allowlistedSelects }: SelectConfig,
 ) =>
   (!!allowlistedSelects && !selectIsWithinTypes(select, allowlistedSelects)) ||
   (!!blocklistedSelects && selectIsWithinTypes(select, blocklistedSelects));
+
+export const isValidSelect =
+  ({ blocklistedSelects, allowlistedSelects }: SelectConfig) =>
+  (select: SelectedSelectorT) =>
+    !!select.selected &&
+    !isSelectDisabled(select, { blocklistedSelects, allowlistedSelects });
+
+const resetSelected = (select: SelectorT, config: NodeResetConfig) => {
+  if (config.selectConfig && !isValidSelect(config.selectConfig)(select)) {
+    return { ...select, selected: false };
+  }
+
+  return {
+    ...select,
+    selected: config.useDefaults ? !!select.default : false,
+  };
+};
+
+export const resetSelects = (
+  selects: SelectorT[],
+  config: NodeResetConfig = {},
+): SelectedSelectorT[] =>
+  selects.map((select) => resetSelected(select, config));

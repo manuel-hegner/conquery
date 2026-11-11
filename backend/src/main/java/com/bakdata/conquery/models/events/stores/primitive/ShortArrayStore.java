@@ -1,6 +1,7 @@
 package com.bakdata.conquery.models.events.stores.primitive;
 
 import com.bakdata.conquery.io.cps.CPSType;
+import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.stores.root.ColumnStore;
 import com.bakdata.conquery.models.events.stores.root.IntegerStore;
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -31,6 +32,7 @@ public class ShortArrayStore implements IntegerStore {
 	}
 
 	@Override
+	@ToString.Include
 	public int getLines() {
 		return values.length;
 	}
@@ -42,6 +44,11 @@ public class ShortArrayStore implements IntegerStore {
 
 	public ShortArrayStore select(int[] starts, int[] ends) {
 		return new ShortArrayStore(ColumnStore.selectArray(starts, ends, values, short[]::new), nullValue);
+	}
+
+	@Override
+	public ShortArrayStore createDescription() {
+		return ColumnStore.emptyCopy(this);
 	}
 
 	@Override
@@ -62,6 +69,10 @@ public class ShortArrayStore implements IntegerStore {
 	@Override
 	public long getInteger(int event) {
 		return values[event];
+	}
+
+	public void setParent(Bucket bucket) {
+		// not used
 	}
 
 }

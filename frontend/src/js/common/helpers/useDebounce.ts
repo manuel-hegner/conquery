@@ -5,35 +5,32 @@ type Timeout = ReturnType<typeof setTimeout>;
 // Note: No need to add callbacks used inside `fn` to the debounceTriggers
 //       because fn will be saved in a ref / will always be up to date
 export const useDebounce = (
-  fn: (...args: any) => any,
-  ms: number,
-  debounceTriggers: any[],
+  fn: (...args: unknown[]) => unknown,
+  delay: number,
+  debounceTriggers: unknown[],
 ) => {
   const handle = useRef<Timeout | null>(null);
-  const fnRef = useRef<(...args: any) => any>(fn);
-  const msRef = useRef<number>(ms);
+  const fnRef = useRef<(...args: unknown[]) => unknown>(fn);
+  const delayRef = useRef<number>(delay);
 
   useEffect(() => {
     fnRef.current = fn;
   }, [fn]);
   useEffect(() => {
-    msRef.current = ms;
-  }, [ms]);
+    delayRef.current = delay;
+  }, [delay]);
 
   useEffect(() => {
     if (handle.current) clearTimeout(handle.current);
 
     handle.current = setTimeout(
       fnRef.current.bind(null, ...debounceTriggers),
-      msRef.current,
+      delayRef.current,
     );
 
     return () => {
       if (handle.current) clearTimeout(handle.current);
     };
-
-    // Yes, dependencies can't be statically verified,
-    // but this way, useDebounce almost works like useEffect
-    // eslint-disable-next-line
+    // biome-ignore lint/correctness/useExhaustiveDependencies: dependencies are passed in by the caller, so useDebounce works like useEffect
   }, debounceTriggers);
 };

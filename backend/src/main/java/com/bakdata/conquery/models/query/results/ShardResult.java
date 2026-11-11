@@ -3,36 +3,37 @@ package com.bakdata.conquery.models.query.results;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import com.bakdata.conquery.io.cps.CPSBase;
 import com.bakdata.conquery.io.cps.CPSType;
 import com.bakdata.conquery.models.error.ConqueryError;
 import com.bakdata.conquery.models.identifiable.ids.specific.ManagedExecutionId;
 import com.bakdata.conquery.models.identifiable.ids.specific.WorkerId;
-import com.bakdata.conquery.models.messages.namespaces.specific.CollectQueryResult;
+import com.bakdata.conquery.models.messages.namespaces.NamespaceMessage;
+import com.bakdata.conquery.models.messages.namespaces.NamespacedMessage;
+import com.bakdata.conquery.models.query.DistributedExecutionManager;
+import com.bakdata.conquery.models.query.ManagedQuery;
+import com.bakdata.conquery.models.worker.DistributedNamespace;
 import com.bakdata.conquery.models.worker.Worker;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.NonNull;
-import lombok.Setter;
-import lombok.ToString;
+import lombok.*;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 @JsonTypeInfo(use = JsonTypeInfo.Id.CUSTOM, property = "type")
 @CPSBase
-@CPSType(id = "SHARD_RESULT", base = ShardResult.class)
+@CPSType(id = "SHARD_RESULT", base = NamespacedMessage.class)
 @Getter
 @Setter
 @Slf4j
 @ToString(onlyExplicitlyIncluded = true)
-@NoArgsConstructor
-public class ShardResult {
+@NoArgsConstructor(onConstructor_ = {@JsonCreator})
+public class ShardResult  extends NamespaceMessage {
 
 
 	@ToString.Include
-	private ManagedExecutionId queryId;
+	private ManagedExecutionId executionId;
 
 	@ToString.Include
 	private WorkerId workerId;
@@ -45,35 +46,38 @@ public class ShardResult {
 	@ToString.Include
 	private LocalDateTime finishTime;
 
-	private Optional<ConqueryError> error = Optional.empty();
+	private ConqueryError error;
 
 
-	public ShardResult(ManagedExecutionId queryId, WorkerId workerId) {
-		this.queryId = queryId;
+	public ShardResult(ManagedExecutionId executionId, WorkerId workerId) {
+		this.executionId = executionId;
 		this.workerId = workerId;
 	}
 
-	public synchronized void finish(@NonNull List<EntityResult> results, Optional<Throwable> exc, Worker worker) {
-		if (worker.getQueryExecutor().isCancelled(getQueryId())) {
+	public synchronized void finish(@NonNull List<EntityResult> results, Worker worker) {
+		if (worker.getQueryExecutor().isCancelled(getExecutionId())) {
 			// Query is done so we no longer need the cancellation entry.
-			worker.getQueryExecutor().unsetQueryCancelled(getQueryId());
+			worker.getQueryExecutor().unsetQueryCancelled(getExecutionId());
 			return;
 		}
 
 		finishTime = LocalDateTime.now();
 
-		if (exc.isPresent()) {
-			log.info("FAILED Query[{}] within {}", queryId, Duration.between(startTime, finishTime));
 
-			setError(exc.map(ConqueryError::asConqueryError));
-		}
-		else {
-			log.info("FINISHED Query[{}] with {} results within {}", queryId, results.size(), Duration.between(startTime, finishTime));
-		}
+		log.info("FINISHED Query[{}] with {} results within {}", executionId, results.size(), Duration.between(startTime, finishTime));
 
 		this.results = results;
 
-		worker.send(new CollectQueryResult(this));
+		// Truncate here because too large logs will crash/lock the process
+		log.trace("Collected Results for execution {}\n{}", executionId, StringUtils.truncate(results.toString(), 1000) + " (...)");
 	}
 
+	protected void addResult(DistributedExecutionManager executionManager) {
+		executionManager.handleQueryResult(this, ((ManagedQuery) executionManager.getExecution(executionId)));
+	}
+
+	@Override
+	public void react(DistributedNamespace context) throws Exception {
+		addResult(context.getExecutionManager());
+	}
 }

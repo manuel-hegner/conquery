@@ -1,83 +1,69 @@
 package com.bakdata.conquery.resources.admin.ui;
 
-import static com.bakdata.conquery.resources.ResourceConstants.DATASET;
-import static com.bakdata.conquery.resources.ResourceConstants.JOB_ID;
-
-import java.time.LocalDate;
-import java.util.Map;
+import java.net.URI;
 import java.util.Objects;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.NewCookie;
+import jakarta.ws.rs.core.Response;
 
-import javax.inject.Inject;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
-
-import com.bakdata.conquery.io.jackson.Jackson;
-import com.bakdata.conquery.io.jersey.ExtraMimeTypes;
-import com.bakdata.conquery.models.auth.entities.User;
-import com.bakdata.conquery.models.common.Range;
-import com.bakdata.conquery.models.datasets.Dataset;
-import com.bakdata.conquery.models.exceptions.JSONException;
-import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
-import com.bakdata.conquery.models.jobs.Job;
-import com.bakdata.conquery.models.jobs.JobManagerStatus;
-import com.bakdata.conquery.models.messages.network.specific.CancelJobMessage;
-import com.bakdata.conquery.models.worker.ShardNodeInformation;
-import com.bakdata.conquery.resources.admin.AdminServlet;
-import com.bakdata.conquery.resources.admin.rest.AdminProcessor;
+import com.bakdata.conquery.models.auth.entities.Subject;
+import com.bakdata.conquery.models.auth.web.csrf.CsrfTokenSetFilter;
+import com.bakdata.conquery.models.config.auth.AuthenticationConfig;
+import com.bakdata.conquery.resources.ResourceConstants;
 import com.bakdata.conquery.resources.admin.rest.UIProcessor;
 import com.bakdata.conquery.resources.admin.ui.model.UIView;
-import com.bakdata.conquery.resources.hierarchies.HAdmin;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.util.concurrent.Uninterruptibles;
-import groovy.lang.GroovyShell;
 import io.dropwizard.auth.Auth;
-import io.dropwizard.views.View;
+import io.dropwizard.views.common.View;
 import lombok.RequiredArgsConstructor;
-import org.apache.commons.lang3.exception.ExceptionUtils;
-import org.codehaus.groovy.control.CompilerConfiguration;
-import org.codehaus.groovy.control.customizers.ImportCustomizer;
 
 @Produces(MediaType.TEXT_HTML)
-@Consumes({ExtraMimeTypes.JSON_STRING, ExtraMimeTypes.SMILE_STRING})
 @Path("/")
 @RequiredArgsConstructor(onConstructor_=@Inject)
 public class AdminUIResource {
 
 	private final UIProcessor uiProcessor;
-
+	@Context
+	private ContainerRequestContext requestContext;
 	@GET
 	public View getIndex() {
-		return new UIView<>("index.html.ftl", uiProcessor.getUIContext());
+		return new UIView<>("index.html.ftl", uiProcessor.getUIContext(CsrfTokenSetFilter.getCsrfTokenProperty(requestContext)));
 	}
 
 	@GET
 	@Path("script")
 	public View getScript() {
-		return new UIView<>("script.html.ftl", uiProcessor.getUIContext());
+		return new UIView<>("script.html.ftl", uiProcessor.getUIContext(CsrfTokenSetFilter.getCsrfTokenProperty(requestContext)));
 	}
 
 	@GET
 	@Path("jobs")
 	public View getJobs() {
-		return new UIView<>("jobs.html.ftl", uiProcessor.getUIContext(), uiProcessor.getAdminProcessor().getJobs());
+		return new UIView<>("jobs.html.ftl", uiProcessor.getUIContext(CsrfTokenSetFilter.getCsrfTokenProperty(requestContext)), uiProcessor.getAdminProcessor()
+																																		   .getJobs());
 	}
 
 	@GET
 	@Path("queries")
 	public View getQueries() {
-		return new UIView<>("queries.html.ftl", uiProcessor.getUIContext());
+		return new UIView<>("queries.html.ftl", uiProcessor.getUIContext(CsrfTokenSetFilter.getCsrfTokenProperty(requestContext)));
+	}
+
+
+	@GET
+	@Path("logout")
+	public Response logout(@Auth Subject user) {
+		// Invalidate all cookies. At the moment the adminEnd uses cookies only for authentication, so this does not interfere with other things
+		final NewCookie[] expiredCookies = requestContext.getCookies().keySet().stream().map(AuthenticationConfig::expireCookie).toArray(NewCookie[]::new);
+		final URI logout = user.getAuthenticationInfo().getFrontChannelLogout();
+		return Response.seeOther(Objects.requireNonNullElseGet(logout, () -> URI.create("/" + ResourceConstants.ADMIN_UI_SERVLET_PATH)))
+					   .cookie(expiredCookies)
+					   .build();
 	}
 
 }

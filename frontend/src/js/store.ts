@@ -1,29 +1,10 @@
-import { applyMiddleware, compose, createStore, Store } from "redux";
-import { composeWithDevTools } from "redux-devtools-extension";
-import multi from "redux-multi";
-import thunk from "redux-thunk";
+import { composeWithDevTools } from "@redux-devtools/extension";
+import { legacy_createStore as createStore } from "redux";
 
 import buildAppReducer from "./app/reducers";
-import { TabT } from "./pane/types";
 
-export function makeStore(initialState: Object, tabs: Object) {
-  const middleware = applyMiddleware(thunk, multi);
-  const enhancer = composeWithDevTools(middleware);
+export function makeStore() {
+  const enhancer = composeWithDevTools();
 
-  const store = createStore(buildAppReducer(tabs), initialState, enhancer);
-
-  if (module.hot) {
-    // Enable Webpack hot module replacement for reducers
-    module.hot.accept("./app/reducers", () => {
-      const nextRootReducer = buildAppReducer(tabs);
-
-      store.replaceReducer(nextRootReducer);
-    });
-  }
-
-  return store;
-}
-
-export function updateReducers(store: Store, tabs: TabT[]) {
-  store.replaceReducer(buildAppReducer(tabs));
+  return createStore(buildAppReducer(), {}, enhancer);
 }

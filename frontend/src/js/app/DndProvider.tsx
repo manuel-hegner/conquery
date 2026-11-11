@@ -1,29 +1,35 @@
-import styled from "@emotion/styled";
-import React, { FC } from "react";
+import type { ReactNode } from "react";
 import { DndProvider as ReactDndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import MultiBackend, {
+import {
+  MultiBackend,
   TouchTransition,
   usePreview,
 } from "react-dnd-multi-backend";
 import { TouchBackend } from "react-dnd-touch-backend";
+import { tv } from "tailwind-variants";
 
-const PreviewItem = styled("div")<{ width: number; height: number }>`
-  background-color: ${({ theme }) => theme.col.grayVeryLight};
-  opacity: 0.9;
-  box-shadow: 0 0 15px 0 rgba(0, 0, 0, 0.2);
-  border-radius: ${({ theme }) => theme.borderRadius};
-  border: 1px solid ${({ theme }) => theme.col.gray};
-  width: ${({ width }) => `${width}px`};
-  height: ${({ height }) => `${height}px`};
-`;
+import { DNDType } from "../common/constants/dndTypes";
+import type { PossibleDroppableObject } from "../ui-components/Dropzone";
+
+const previewItem = tv({
+  base: [
+    "rounded",
+    "border border-gray-500",
+    "bg-gray-50",
+    "opacity-90",
+    "shadow-[0_0_15px_0_rgba(0,0,0,0.2)]",
+  ],
+});
 
 const CustomHTML5toTouch = {
   backends: [
     {
+      id: "html5",
       backend: HTML5Backend,
     },
     {
+      id: "touch",
       backend: TouchBackend,
       transition: TouchTransition,
       options: { enableMouseEvents: true, delayTouchStart: 100 },
@@ -43,17 +49,38 @@ export function getWidthAndHeight(ref: React.RefObject<HTMLElement | null>) {
   };
 }
 
-const DndPreview: FC = () => {
-  const { display, item, style } = usePreview();
+const findItemWithAndHeight = (
+  item: PossibleDroppableObject,
+): { width: number; height: number } => {
+  switch (item.type) {
+    case "__NATIVE_FILE__":
+      return { width: 0, height: 0 };
+    case DNDType.FORM_CONFIG:
+    case DNDType.CONCEPT_TREE_NODE:
+    case DNDType.PREVIOUS_QUERY:
+    case DNDType.PREVIOUS_SECONDARY_ID_QUERY:
+      return { width: item.dragContext.width, height: item.dragContext.height };
+  }
+};
 
-  if (!display) {
+const DndPreview = () => {
+  const preview = usePreview<PossibleDroppableObject>();
+
+  if (!preview.display) {
     return null;
   }
 
-  return <PreviewItem width={item.width} height={item.height} style={style} />;
+  const { width, height } = findItemWithAndHeight(preview.item);
+
+  return (
+    <div
+      className={previewItem()}
+      style={{ width, height, ...preview.style }}
+    />
+  );
 };
 
-const DndProvider: FC = ({ children }) => {
+const DndProvider = ({ children }: { children: ReactNode }) => {
   return (
     <ReactDndProvider backend={MultiBackend} options={CustomHTML5toTouch}>
       {children}

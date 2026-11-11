@@ -1,14 +1,17 @@
 package com.bakdata.conquery.models.forms.util;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.OptionalInt;
+
 import c10n.C10N;
 import com.bakdata.conquery.apiv1.forms.FeatureGroup;
 import com.bakdata.conquery.internationalization.DateContextResolutionC10n;
-import com.bakdata.conquery.internationalization.Localized;
-import com.bakdata.conquery.models.common.daterange.CDateRange;
+import com.bakdata.conquery.models.common.LocalizedToString;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.RequiredArgsConstructor;
-
-import java.util.*;
 
 /**
  * Defines the granularity into which a given date range mask is chunked.
@@ -19,15 +22,14 @@ import java.util.*;
  * edge context.
  */
 @RequiredArgsConstructor
-public enum Resolution implements Localized {
+public enum Resolution implements LocalizedToString {
 	/**
-	 * For returning contexts with a single {@link CDateRange} for the entire
+	 * For returning contexts with a single {@link com.bakdata.conquery.models.common.daterange.CDateRange} for the entire
 	 * {@link FeatureGroup}.
 	 */
 	COMPLETE(null) {
 		@Override
 		public String toString(Locale locale) {
-
 			return C10N.get(DateContextResolutionC10n.class, locale).complete();
 		}
 
@@ -38,28 +40,24 @@ public enum Resolution implements Localized {
 	},
 
 	/**
-	 * The {@link CDateRange} contexts per {@link FeatureGroup} are subdivided into
+	 * The {@link com.bakdata.conquery.models.common.daterange.CDateRange} contexts per {@link FeatureGroup} are subdivided into
 	 * years.
 	 */
 
 	YEARS(COMPLETE) {
 		@Override
 		public String toString(Locale locale) {
-
 			return C10N.get(DateContextResolutionC10n.class, locale).year();
 		}
 
 		@Override
 		protected List<Alignment> getCompatibleAlignments() {
-			return List.of(
-					Alignment.YEAR,
-					Alignment.QUARTER,
-					Alignment.DAY);
+			return List.of(Alignment.YEAR, Alignment.QUARTER, Alignment.DAY);
 		}
 	},
 
 	/**
-	 * The {@link CDateRange} contexts per {@link FeatureGroup} are subdivided into
+	 * The {@link com.bakdata.conquery.models.common.daterange.CDateRange} contexts per {@link FeatureGroup} are subdivided into
 	 * quarters.
 	 */
 	QUARTERS(YEARS) {
@@ -71,14 +69,12 @@ public enum Resolution implements Localized {
 
 		@Override
 		protected List<Alignment> getCompatibleAlignments() {
-			return List.of(
-					Alignment.QUARTER,
-					Alignment.DAY);
+			return List.of(Alignment.QUARTER, Alignment.DAY);
 		}
 	},
 
 	/**
-	 * The {@link CDateRange} contexts per {@link FeatureGroup} are subdivided into
+	 * The {@link com.bakdata.conquery.models.common.daterange.CDateRange} contexts per {@link FeatureGroup} are subdivided into
 	 * days.
 	 */
 	DAYS(QUARTERS) {
@@ -100,7 +96,11 @@ public enum Resolution implements Localized {
 
 	private List<Resolution> thisAndCoarserSubdivisions;
 
-	public abstract String toString(Locale locale);
+	@JsonIgnore
+	public Alignment getDefaultAlignment() {
+		// The first alignment is considered the default
+		return getCompatibleAlignments().get(0);
+	}
 
 	/**
 	 * Returns the alignments, that are compatible with this resolution.
@@ -109,17 +109,6 @@ public enum Resolution implements Localized {
 	 */
 	@JsonIgnore
 	protected abstract List<Alignment> getCompatibleAlignments();
-
-	@JsonIgnore
-	public boolean isAlignmentSupported(Alignment alignment) {
-		return getCompatibleAlignments().contains(alignment);
-	}
-
-	@JsonIgnore
-	public Alignment getDefaultAlignment() {
-		// The first alignment is considered the default
-		return getCompatibleAlignments().get(0);
-	}
 
 	/**
 	 * Returns the amount of calendar alignment sub date ranges that would fit in to this resolution.
@@ -133,6 +122,11 @@ public enum Resolution implements Localized {
 	}
 
 	@JsonIgnore
+	public boolean isAlignmentSupported(Alignment alignment) {
+		return getCompatibleAlignments().contains(alignment);
+	}
+
+	@JsonIgnore
 	public List<Resolution> getThisAndCoarserSubdivisions() {
 		if (thisAndCoarserSubdivisions != null) {
 			return thisAndCoarserSubdivisions;
@@ -143,6 +137,6 @@ public enum Resolution implements Localized {
 		}
 		thisAndCoarser.add(this);
 		return thisAndCoarserSubdivisions = Collections.unmodifiableList(thisAndCoarser);
-
 	}
+
 }

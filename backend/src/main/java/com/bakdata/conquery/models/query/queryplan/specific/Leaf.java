@@ -9,7 +9,9 @@ import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.QPNode;
 import com.bakdata.conquery.models.query.queryplan.aggregators.Aggregator;
+import lombok.ToString;
 
+@ToString
 public class Leaf extends QPNode {
 
 	private boolean triggered = false;
@@ -21,8 +23,9 @@ public class Leaf extends QPNode {
 	}
 
 	@Override
-	public void acceptEvent(Bucket bucket, int event) {
+	public boolean acceptEvent(Bucket bucket, int event) {
 		triggered = true;
+		return true;
 	}
 
 	@Override
@@ -37,9 +40,9 @@ public class Leaf extends QPNode {
 
 	@Override
 	public boolean isOfInterest(Bucket bucket) {
-		return true;
+		return bucket.containsEntity(entity.getId());
 	}
-	
+
 	@Override
 	public boolean isOfInterest(Entity entity) {
 		return true;

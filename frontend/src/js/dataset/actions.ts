@@ -1,33 +1,41 @@
-import { StateT } from "app-types";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useDispatch, useSelector } from "react-redux";
-import { reset } from "redux-form";
+import {
+  type ActionType,
+  createAction,
+  createAsyncAction,
+} from "typesafe-actions";
 
 import { useGetDatasets } from "../api/api";
-import type { DatasetIdT } from "../api/types";
-import { defaultError, defaultSuccess } from "../common/actions";
+import type { DatasetT, GetDatasetsResponseT } from "../api/types";
+import type { StateT } from "../app/reducers";
+import type { ErrorObject } from "../common/actions/genericActions";
 import { exists } from "../common/helpers/exists";
 import { useLoadTrees } from "../concept-trees/actions";
+import {
+  resetHistory,
+  useLoadDefaultHistoryParams,
+} from "../entity-history/actions";
 import { useLoadQueries } from "../previous-queries/list/actions";
+import { queryResultReset } from "../query-runner/actions";
 import { setMessage } from "../snack-message/actions";
 import { clearQuery, loadSavedQuery } from "../standard-query-editor/actions";
 import type { StandardQueryStateT } from "../standard-query-editor/queryReducer";
 
-import {
-  LOAD_DATASETS_START,
-  LOAD_DATASETS_SUCCESS,
-  LOAD_DATASETS_ERROR,
-  SELECT_DATASET,
-  SAVE_QUERY,
-} from "./actionTypes";
 import { setDatasetId } from "./globalDatasetHelper";
-import type { DatasetT } from "./reducer";
+import type { DatasetStateT } from "./reducer";
+import { useDatasetId } from "./selectors";
 
-export const loadDatasetsStart = () => ({ type: LOAD_DATASETS_START });
-export const loadDatasetsError = (err: any) =>
-  defaultError(LOAD_DATASETS_ERROR, err);
-export const loadDatasetsSuccess = (res: any) =>
-  defaultSuccess(LOAD_DATASETS_SUCCESS, res);
+export type DatasetActions = ActionType<
+  typeof loadDatasets | typeof selectDatasetInput | typeof saveQuery
+>;
+
+export const loadDatasets = createAsyncAction(
+  "dataset/LOAD_DATASETS_START",
+  "dataset/LOAD_DATASETS_SUCCESS",
+  "dataset/LOAD_DATASETS_ERROR",
+)<void, { datasets: GetDatasetsResponseT }, ErrorObject>();
 
 // Done at the very beginning on loading the site
 export const useLoadDatasets = () => {
@@ -35,9 +43,10 @@ export const useLoadDatasets = () => {
   const dispatch = useDispatch();
   const getDatasets = useGetDatasets();
   const loadTrees = useLoadTrees();
+  const loadDefaultHistoryParams = useLoadDefaultHistoryParams();
 
-  return async () => {
-    dispatch(loadDatasetsStart());
+  return useCallback(async () => {
+    dispatch(loadDatasets.request());
 
     try {
       const datasets = await getDatasets();
@@ -46,79 +55,101 @@ export const useLoadDatasets = () => {
         throw new Error("No valid dataset found");
       }
 
-      dispatch(loadDatasetsSuccess(datasets));
+      dispatch(loadDatasets.success({ datasets }));
 
       const defaultId = datasets[0].id;
 
       setDatasetId(defaultId);
 
+      loadDefaultHistoryParams(defaultId);
+
       return loadTrees(defaultId);
     } catch (e) {
-      dispatch(setMessage({ message: t("datasetSelector.error") }));
-      dispatch(loadDatasetsError(e));
+      dispatch(
+        setMessage({
+          message: t("datasetSelector.error"),
+          type: "error",
+        }),
+      );
+      dispatch(loadDatasets.failure(e as Error));
     }
-  };
+  }, [dispatch, getDatasets, loadDefaultHistoryParams, loadTrees, t]);
 };
 
-export const selectDatasetInput = (id: DatasetIdT | null) => {
-  return {
-    type: SELECT_DATASET,
-    payload: { id },
-  };
-};
+export const selectDatasetInput = createAction("dataset/SELECT")<{
+  id: DatasetT["id"] | null;
+}>();
 
-export const saveQuery = (
-  query: StandardQueryStateT,
-  previouslySelectedDatasetId: DatasetIdT,
-) => {
-  return { type: SAVE_QUERY, payload: { query, previouslySelectedDatasetId } };
-};
-
-const selectActiveForm = (state: StateT) => {
-  return state.externalForms && state.externalForms.activeForm;
-};
+export const saveQuery = createAction("dataset/SAVE_QUERY")<{
+  query: StandardQueryStateT;
+  previouslySelectedDatasetId: DatasetT["id"];
+}>();
 
 export const useSelectDataset = () => {
   const dispatch = useDispatch();
   const loadTrees = useLoadTrees();
-  const activeForm = useSelector<StateT, string | null>(selectActiveForm);
-  const loadQueries = useLoadQueries();
+  const { loadQueries } = useLoadQueries();
+  const previouslySelectedDatasetId = useDatasetId();
+  const locallySavedQueries = useSelector<
+    StateT,
+    DatasetStateT["locallySavedQueries"]
+  >((state) => state.datasets.locallySavedQueries);
 
-  return (
-    datasets: DatasetT[],
-    datasetId: DatasetIdT | null,
-    previouslySelectedDatasetId: DatasetIdT | null,
-    query: StandardQueryStateT,
-  ) => {
-    if (previouslySelectedDatasetId) {
-      dispatch(saveQuery(query, previouslySelectedDatasetId));
-    }
+  const loadDefaultHistoryParams = useLoadDefaultHistoryParams();
 
-    dispatch(selectDatasetInput(datasetId));
+  const query = useSelector<StateT, StandardQueryStateT>(
+    (state) => state.queryEditor.query,
+  );
+  // Avoid constant re-renders when updating the query
+  const queryRef = useRef(query);
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
 
-    // To allow loading trees to check whether they should abort or not
-    setDatasetId(datasetId);
+  return useCallback(
+    (datasetId: DatasetT["id"] | null) => {
+      if (previouslySelectedDatasetId) {
+        dispatch(
+          saveQuery({ query: queryRef.current, previouslySelectedDatasetId }),
+        );
+      }
 
-    // Load query if available, else clear
-    if (!exists(datasetId)) {
-      return dispatch(clearQuery());
-    } else {
-      const nextDataset = datasets.find((db) => db.id === datasetId);
+      dispatch(selectDatasetInput({ id: datasetId }));
 
-      if (!nextDataset || !nextDataset.query) {
-        dispatch(clearQuery());
+      dispatch(resetHistory({ includingDefaultParams: true }));
+      dispatch(queryResultReset({ queryType: "standard" }));
+      dispatch(queryResultReset({ queryType: "timebased" }));
+      dispatch(queryResultReset({ queryType: "editorV2" }));
+      dispatch(queryResultReset({ queryType: "externalForms" }));
+
+      // To allow loading trees to check whether they should abort or not
+      setDatasetId(datasetId);
+
+      // Load query if available, else clear
+      if (!exists(datasetId)) {
+        return dispatch(clearQuery());
       } else {
-        dispatch(loadSavedQuery({ query: nextDataset.query }));
+        const nextDatasetSavedQuery = locallySavedQueries[datasetId];
+
+        if (!nextDatasetSavedQuery) {
+          dispatch(clearQuery());
+        } else {
+          dispatch(loadSavedQuery({ query: nextDatasetSavedQuery }));
+        }
+
+        loadTrees(datasetId);
+        loadDefaultHistoryParams(datasetId);
+
+        return loadQueries(datasetId);
       }
-
-      loadTrees(datasetId);
-
-      // CLEAR Redux Form
-      if (activeForm) {
-        dispatch(reset(activeForm));
-      }
-
-      return loadQueries(datasetId);
-    }
-  };
+    },
+    [
+      dispatch,
+      loadTrees,
+      loadQueries,
+      locallySavedQueries,
+      previouslySelectedDatasetId,
+      loadDefaultHistoryParams,
+    ],
+  );
 };

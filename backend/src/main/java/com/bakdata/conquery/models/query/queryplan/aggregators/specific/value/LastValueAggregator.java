@@ -1,14 +1,17 @@
 package com.bakdata.conquery.models.query.queryplan.aggregators.specific.value;
 
-import java.util.OptionalInt;
+import static com.bakdata.conquery.models.query.StringUtils.getSubstringFromRange;
 
+import com.bakdata.conquery.models.common.Range;
+import com.bakdata.conquery.models.common.daterange.CDateRange;
 import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.datasets.Table;
+import com.bakdata.conquery.models.datasets.concepts.ValidityDate;
 import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.externalservice.ResultType;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.aggregators.SingleColumnAggregator;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -16,23 +19,26 @@ import lombok.extern.slf4j.Slf4j;
  * @param <VALUE> Value type of the column/return value
  */
 @Slf4j
+@ToString(callSuper = true, onlyExplicitlyIncluded = true)
 public class LastValueAggregator<VALUE> extends SingleColumnAggregator<VALUE> {
 
+	private final Range.IntegerRange substring;
 
-	private OptionalInt selectedEvent = OptionalInt.empty();
+	private int selectedEvent = -1;
 	private Bucket selectedBucket;
 	private int date;
 
-	private Column validityDateColumn;
+	private ValidityDate validityDateColumn;
 
-	public LastValueAggregator(Column column) {
+	public LastValueAggregator(Column column, Range.IntegerRange substring) {
 		super(column);
+		this.substring = substring;
 	}
 
 	@Override
 	public void init(Entity entity, QueryExecutionContext context) {
-		selectedEvent = OptionalInt.empty();
-		date = Integer.MIN_VALUE;
+		selectedEvent = -1;
+		date = CDateRange.NEGATIVE_INFINITY;
 		selectedBucket = null;
 	}
 
@@ -42,33 +48,33 @@ public class LastValueAggregator<VALUE> extends SingleColumnAggregator<VALUE> {
 	}
 
 	@Override
-	public void acceptEvent(Bucket bucket, int event) {
+	public void consumeEvent(Bucket bucket, int event) {
 		if (!bucket.has(event, getColumn())) {
 			return;
 		}
-		
+
 		if (validityDateColumn == null) {
 			// If there is no validity date, take the first possible value
 			if(selectedBucket == null) {
 				selectedBucket = bucket;
-				selectedEvent = OptionalInt.of(event);
+				selectedEvent = event;
 			} else {
 				log.trace("There is more than one value for the {}. Choosing the very first one encountered", this.getClass().getSimpleName());
 			}
-			return;			
-		}
-		
-		if(! bucket.has(event, validityDateColumn)) {
-			// TODO this might be an IllegalState
 			return;
 		}
 
+		final CDateRange dateRange = validityDateColumn.getValidityDate(event, bucket);
 
-		int next = bucket.getAsDateRange(event, validityDateColumn).getMaxValue();
+		if (dateRange == null){
+			return;
+		}
+
+		int next = dateRange.getMaxValue();
 
 		if (next > date) {
 			date = next;
-			selectedEvent = OptionalInt.of(event);
+			selectedEvent = event;
 			selectedBucket = bucket;
 		}
 		else if (next == date) {
@@ -78,15 +84,16 @@ public class LastValueAggregator<VALUE> extends SingleColumnAggregator<VALUE> {
 
 	@Override
 	public VALUE createAggregationResult() {
-		if (selectedBucket == null && selectedEvent.isEmpty()) {
+		if (selectedBucket == null) {
 			return null;
 		}
 
-		return (VALUE) selectedBucket.createScriptValue(selectedEvent.getAsInt(), getColumn());
+		if (substring != null) {
+			String string = selectedBucket.getString(selectedEvent, getColumn());
+			return (VALUE) getSubstringFromRange(string, substring);
+		}
+
+		return (VALUE) selectedBucket.createScriptValue(selectedEvent, getColumn());
 	}
 
-	@Override
-	public ResultType getResultType() {
-		return ResultType.resolveResultType(getColumn().getType());
-	}
 }

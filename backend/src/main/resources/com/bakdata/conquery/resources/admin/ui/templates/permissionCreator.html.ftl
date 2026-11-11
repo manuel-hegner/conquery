@@ -1,7 +1,8 @@
 <#macro permissionCreator ownerId permissionTemplateMap>
     <#local INSTANCES = "instances_">
 	<#local ABILITIES = "abilities_">
-    <table class="table table-striped">
+	<div>
+    <table class="table table-sm table-striped">
         <thead>
             <tr>
             <th scope="col">Domain</th>
@@ -12,6 +13,7 @@
         </thead>
         <tbody>
 		<#list permissionTemplateMap?keys as key>
+			<#assign abilities=permissionTemplateMap[key].getLeft()>
             <tr>
 				<td>${key}</td>
 				<td>
@@ -29,46 +31,101 @@
 						</div>
 					</#if>
 				</td>
-				<td>
-					<input id="${INSTANCES}${key}" type="text" name="fname">
+				<td id="${INSTANCES}${key}">
+					<#if abilities?has_content>
+                        <input type="text" class="form-control" name="fname" oninput="renderInstanceList(this)" placeholder="Instance1, Instance2, ...">
+                        <ul class="list-group">
+                            <!-- list for rendered instances -->
+                        </ul>
+					</#if>
 				</td>
 				<td><a href="#" onclick="submitPermission('${key}')"> <i class="fas fa-share"></i> </a> </td>
             </tr>
 		</#list>
 		</tbody>
 	</table>
+	</div>
 	<script type="application/javascript">
-	function submitPermission(domain) {
+
+	function renderInstanceList(instanceListString) {
+	    // from the target input field render a list with the target instances cleaned from white spaces
+	    const instanceList = instanceListString.parentNode.getElementsByTagName("ul")[0];
+	    // reset list content
+	    instanceList.innerHTML = '';
+	    instanceListString.value.split(',')
+	        .map(i => i.trim())
+	        .filter(i => !!i)
+	        .forEach(i => {
+                var li = document.createElement("li");
+                li.setAttribute("class", "list-group-item p-1");
+                li.innerHTML = i
+	            instanceList.appendChild(li)
+	        });
+	}
+
+	async function submitPermission(domain) {
 		event.preventDefault();
 
 
 		let abilitySelector = document.getElementById("${ABILITIES}"+domain);
-		abilityJoin = null;
+		let abilityJoin = null;
+		let abilities = [];
 		if (abilitySelector != null) {
-			let abilities = [];
 			let abilityCheckboxes =abilitySelector.getElementsByTagName('input');
 			for(let cb of abilityCheckboxes ) {
 				if(cb.checked){
-					abilities.push(cb.value)
+					abilities.push(cb.value.trim())
 				}
 			}
-			if(abilityCheckboxes.length > 0 && abilities.length == 0 ) {
+			if(abilityCheckboxes.length > 0 && abilities.length === 0 ) {
 				alert("No abilities for permission specified");
 				return;
 			}
 			abilityJoin = abilities.join(",");
 		}
 
-		let instanceInput = document.getElementById("${INSTANCES}"+domain).value;
-		
-		permission = [domain, abilityJoin, instanceInput].join(":")
+        // Collection only as a member if a permission supports abilities and thus targets
+		let instanceInput = document.getElementById("${INSTANCES}"+domain).getElementsByTagName("ul");
+
+
+		let instances = null;
+		if(instanceInput.length !== 0) {
+			if (abilities.length === 0) {
+				alert("Abilities are required if instances are set");
+				return;
+			}
+		    // Permission can have targets
+		    instances = Array.from(instanceInput[0].children,c => c.innerHTML).join(",");
+		}
+
+
+		let permission = [domain, abilityJoin, instances].filter(x => !!x).join(":");
 		console.log("Sending Permission: " + permission);
-		fetch('/admin/permissions/${ownerId}',
+		let response = await rest('/admin/permissions/${ownerId}',
 			{
 				method: 'post',
-				credentials: 'same-origin',
-				headers: {'Content-Type': 'text/plain'},
-				body: permission}).then(function(){location.reload()})
+				body: permission
+			}
+		);
+		if (!response.ok) {
+			showToastMessage(
+					ToastTypes.ERROR,
+					"Error",
+					"The send request came back with the following error: " + (await response.json()).message,
+					"Status " + response.status,
+			);
+		} else {
+			showToastMessage(
+					ToastTypes.SUCCESS,
+					"Permission Created",
+					`Permission was created`,
+					"Status " + response.status,
+			);
+			setTimeout(function(){
+				location.reload();
+			}, 500);
+
+		}
 	}
 	</script>
 </#macro>

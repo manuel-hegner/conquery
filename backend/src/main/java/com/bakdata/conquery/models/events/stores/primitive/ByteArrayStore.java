@@ -1,6 +1,7 @@
 package com.bakdata.conquery.models.events.stores.primitive;
 
 import com.bakdata.conquery.io.cps.CPSType;
+import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.stores.root.ColumnStore;
 import com.bakdata.conquery.models.events.stores.root.IntegerStore;
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -32,6 +33,7 @@ public class ByteArrayStore implements IntegerStore {
 	}
 
 	@Override
+	@ToString.Include
 	public int getLines() {
 		return values.length;
 	}
@@ -39,6 +41,11 @@ public class ByteArrayStore implements IntegerStore {
 	@Override
 	public long estimateEventBits() {
 		return Byte.SIZE;
+	}
+
+	@Override
+	public ByteArrayStore createDescription() {
+		return ColumnStore.emptyCopy(this);
 	}
 
 	public ByteArrayStore select(int[] starts, int[] ends) {
@@ -63,6 +70,10 @@ public class ByteArrayStore implements IntegerStore {
 	@Override
 	public long getInteger(int event) {
 		return values[event];
+	}
+
+	public void setParent(Bucket bucket) {
+		// not used
 	}
 
 }

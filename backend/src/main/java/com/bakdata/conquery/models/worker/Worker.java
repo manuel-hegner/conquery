@@ -2,27 +2,23 @@ package com.bakdata.conquery.models.worker;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.time.Clock;
 import java.util.concurrent.ExecutorService;
 
-import javax.validation.Validator;
-
-import com.bakdata.conquery.io.jackson.serializer.NsIdRef;
 import com.bakdata.conquery.io.mina.MessageSender;
 import com.bakdata.conquery.io.mina.NetworkSession;
 import com.bakdata.conquery.io.storage.ModificationShieldedWorkerStorage;
 import com.bakdata.conquery.io.storage.WorkerStorage;
-import com.bakdata.conquery.models.config.StoreFactory;
 import com.bakdata.conquery.models.config.ThreadPoolDefinition;
-import com.bakdata.conquery.models.datasets.Dataset;
 import com.bakdata.conquery.models.datasets.Import;
 import com.bakdata.conquery.models.datasets.SecondaryIdDescription;
 import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.datasets.concepts.Concept;
-import com.bakdata.conquery.models.dictionary.Dictionary;
 import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.BucketManager;
-import com.bakdata.conquery.models.identifiable.ids.specific.DictionaryId;
+import com.bakdata.conquery.models.identifiable.ids.specific.ImportId;
 import com.bakdata.conquery.models.identifiable.ids.specific.SecondaryIdDescriptionId;
+import com.bakdata.conquery.models.identifiable.ids.specific.TableId;
 import com.bakdata.conquery.models.jobs.JobManager;
 import com.bakdata.conquery.models.messages.namespaces.NamespaceMessage;
 import com.bakdata.conquery.models.messages.network.MessageToManagerNode;
@@ -30,6 +26,7 @@ import com.bakdata.conquery.models.messages.network.NetworkMessage;
 import com.bakdata.conquery.models.messages.network.specific.ForwardToNamespace;
 import com.bakdata.conquery.models.query.QueryExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
@@ -37,81 +34,62 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class Worker implements MessageSender.Transforming<NamespaceMessage, NetworkMessage<?>>,  Closeable {
+@Getter
+public class Worker implements MessageSender.Transforming<NamespaceMessage, NetworkMessage<?>>, Closeable {
 	// Making this private to have more control over adding and deleting and keeping a consistent state
-	private final WorkerStorage storage;
-	
-	@Getter
-	private final JobManager jobManager;
-	@Getter
-	private final QueryExecutor queryExecutor;
-	@Setter
-	private NetworkSession session;
+	@Getter(AccessLevel.NONE)
+	private WorkerStorage storage;
 	/**
 	 * Pool that can be used in Jobs to execute a job in parallel.
 	 */
-	@Getter
-	private final ExecutorService executorService;
-	@Getter 
-	private final BucketManager bucketManager;
-	
-	
-	private Worker(
-			@NonNull ThreadPoolDefinition queryThreadPoolDefinition,
-			@NonNull WorkerStorage storage,
-			@NonNull ExecutorService executorService,
-			boolean failOnError,
-			int entityBucketSize
-	) {
-		this.jobManager = new JobManager(storage.getWorker().getName(), failOnError);
-		this.storage = storage;
-		this.queryExecutor = new QueryExecutor(this, queryThreadPoolDefinition.createService("QueryExecutor %d"));
-		this.executorService = executorService;
-		this.bucketManager = BucketManager.create(this, storage, entityBucketSize);
+	private ExecutorService jobsExecutorService;
+
+	private JobManager jobManager;
+
+	private QueryExecutor queryExecutor;
+	private BucketManager bucketManager;
+	@Setter
+	private NetworkSession session;
+
+	private Clock clock;
+
+	/**
+	 * @implSpec storage must not be open yet.
+	 */
+	public static Worker create(
+			@NonNull WorkerStorage storage, ShardWorkers shardWorkers, @NonNull ThreadPoolDefinition queryThreadPoolDefinition,
+			@NonNull ExecutorService jobsExecutorService,
+			Clock clock, boolean failOnError,
+			int secondaryIdSubPlanLimit, ObjectMapper persistenceMapper, boolean loadStorage) {
+
+
+		final Worker worker = new Worker();
+
+		worker.clock = clock;
+		worker.storage = storage;
+		worker.jobsExecutorService = jobsExecutorService;
+		worker.queryExecutor = new QueryExecutor(worker, queryThreadPoolDefinition.createService("QueryExecutor %d"), secondaryIdSubPlanLimit);
+
+		// The order of the remaining code cannot be changed, there are dependencies throughout.
+		storage.openStores(persistenceMapper);
+		storage.loadKeys();
+
+		shardWorkers.addWorker(worker);
+
+		if (loadStorage) {
+			storage.loadData();
+		}
+
+		worker.jobManager = new JobManager(storage.getWorker().getName(), failOnError);
+
+		// BucketManager.create loads NamespacedStorage keys
+		worker.bucketManager = BucketManager.create(worker, storage);
+
+		return worker;
 	}
 
-	public static Worker newWorker(
-			@NonNull ThreadPoolDefinition queryThreadPoolDefinition,
-			@NonNull ExecutorService executorService,
-			@NonNull WorkerStorage storage,
-			boolean failOnError,
-			int entityBucketSize) {
-
-		return new Worker(queryThreadPoolDefinition, storage, executorService, failOnError, entityBucketSize);
-	}
-
-	public static Worker newWorker(
-			@NonNull Dataset dataset,
-			@NonNull ThreadPoolDefinition queryThreadPoolDefinition,
-			@NonNull ExecutorService executorService,
-			@NonNull StoreFactory config,
-			@NonNull String directory,
-			@NonNull Validator validator,
-			boolean failOnError,
-			int entityBucketSize) {
-
-		WorkerStorage workerStorage = new WorkerStorage(validator, "worker_" + directory);
-
-		// On the worker side we don't have to set the object writer vor ForwardToWorkerMessages in WorkerInformation
-		WorkerInformation info = new WorkerInformation();
-		info.setDataset(dataset.getId());
-		info.setName(directory);
-		info.setEntityBucketSize(entityBucketSize);
-
-		workerStorage.openStores(config);
-		workerStorage.loadData();
-		workerStorage.updateDataset(dataset);
-		workerStorage.setWorker(info);
-
-		return new Worker(queryThreadPoolDefinition, workerStorage, executorService, failOnError, entityBucketSize);
-	}
-	
 	public ModificationShieldedWorkerStorage getStorage() {
 		return new ModificationShieldedWorkerStorage(storage);
-	}
-	
-	public WorkerInformation getInfo() {
-		return storage.getWorker();
 	}
 
 	@Override
@@ -124,9 +102,8 @@ public class Worker implements MessageSender.Transforming<NamespaceMessage, Netw
 		return new ForwardToNamespace(getInfo().getDataset(), message);
 	}
 
-	public ObjectMapper inject(ObjectMapper binaryMapper) {
-		return new SingletonNamespaceCollection(storage.getCentralRegistry())
-					   .injectIntoNew(binaryMapper);
+	public WorkerInformation getInfo() {
+		return storage.getWorker();
 	}
 
 	@Override
@@ -141,7 +118,8 @@ public class Worker implements MessageSender.Transforming<NamespaceMessage, Netw
 
 		try {
 			jobManager.close();
-		}catch (Exception e) {
+		}
+		catch (Exception e) {
 			log.error("Unable to close worker query executor of {}.", this, e);
 		}
 
@@ -152,25 +130,21 @@ public class Worker implements MessageSender.Transforming<NamespaceMessage, Netw
 			log.error("Unable to close worker storage of {}.", this, e);
 		}
 	}
-	
+
 	@Override
 	public String toString() {
-		return "Worker[" + getInfo().getId() + ", " + session.getLocalAddress() + "]";
+		return "Worker[" + getInfo().getId() + ", " + (session != null ? session.getLocalAddress() : "no session") + "]";
 	}
+
 	public boolean isBusy() {
-		return queryExecutor.isBusy();
+		return queryExecutor.isBusy() || jobManager.isSlowWorkerBusy();
 	}
 
 	public void addImport(Import imp) {
 		storage.addImport(imp);
 	}
 
-	public void removeImport(Import imp) {
-
-		for (DictionaryId dictionary : imp.getDictionaries()) {
-			storage.removeDictionary(dictionary);
-		}
-
+	public void removeImport(ImportId imp) {
 		bucketManager.removeImport(imp);
 	}
 
@@ -184,14 +158,6 @@ public class Worker implements MessageSender.Transforming<NamespaceMessage, Netw
 
 	public void updateConcept(Concept<?> concept) {
 		bucketManager.updateConcept(concept);
-	}
-
-	public void updateDataset(Dataset dataset) {
-		storage.updateDataset(dataset);
-	}
-
-	public void updateDictionary(Dictionary dictionary) {
-		storage.updateDictionary(dictionary);
 	}
 
 	public void updateWorkerInfo(WorkerInformation info) {
@@ -209,7 +175,8 @@ public class Worker implements MessageSender.Transforming<NamespaceMessage, Netw
 
 		try {
 			jobManager.close();
-		}catch (Exception e) {
+		}
+		catch (Exception e) {
 			log.error("Unable to close worker query executor of {}.", this, e);
 		}
 
@@ -221,7 +188,7 @@ public class Worker implements MessageSender.Transforming<NamespaceMessage, Netw
 		storage.addTable(table);
 	}
 
-	public void removeTable(@NsIdRef Table table) {
+	public void removeTable(TableId table) {
 		bucketManager.removeTable(table);
 	}
 

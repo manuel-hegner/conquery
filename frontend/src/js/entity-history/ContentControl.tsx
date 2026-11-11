@@ -1,0 +1,97 @@
+import {
+  EuroIcon,
+  FingerprintPatternIcon,
+  FolderIcon,
+  InfoIcon,
+} from "lucide-react";
+import { memo, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ToggleButton } from "../ui-components/ToggleButton";
+import { ToggleButtonGroup } from "../ui-components/ToggleButtonGroup";
+import { Tooltip, TooltipTrigger } from "../ui-components/Tooltip";
+
+export type ContentType =
+  | "groupId"
+  | "secondaryId"
+  | "money"
+  | "concept"
+  | "rest"
+  | "dates";
+export type ContentFilterValue = Record<ContentType, boolean>;
+
+interface Props {
+  value: ContentFilterValue;
+  onChange: (value: ContentFilterValue) => void;
+}
+
+const ContentControl = ({ value, onChange }: Props) => {
+  const { t } = useTranslation();
+
+  const options = useMemo(
+    () => [
+      {
+        key: "money" as const,
+        icon: EuroIcon,
+        tooltip: t("history.content.money"),
+      },
+      {
+        key: "concept" as const,
+        icon: FolderIcon,
+        filled: true,
+        tooltip: t("history.content.concept"),
+      },
+      {
+        key: "rest" as const,
+        icon: InfoIcon,
+        tooltip: t("history.content.rest"),
+      },
+      {
+        key: "groupId" as const,
+        icon: FingerprintPatternIcon,
+        tooltip: t("history.content.fingerprint"),
+      },
+    ],
+    [t],
+  );
+
+  return (
+    <ToggleButtonGroup
+      orientation="vertical"
+      selectionMode="multiple"
+      selectedKeys={options.filter((o) => value[o.key]).map((o) => o.key)}
+      onSelectionChange={(keys) =>
+        onChange({
+          ...value,
+          ...Object.fromEntries(options.map((o) => [o.key, keys.has(o.key)])),
+        })
+      }
+    >
+      {options.map(({ icon: OptionIcon, ...option }) => (
+        <TooltipTrigger key={option.key}>
+          <ToggleButton id={option.key} aria-label={option.tooltip}>
+            <OptionIcon data-filled={option.filled} />
+          </ToggleButton>
+          <Tooltip placement="right">{option.tooltip}</Tooltip>
+        </TooltipTrigger>
+      ))}
+    </ToggleButtonGroup>
+  );
+};
+
+export const useContentControl = () => {
+  const [contentFilter, setContentFilter] = useState<ContentFilterValue>({
+    groupId: true,
+    secondaryId: true,
+    concept: true,
+    money: true,
+    rest: true,
+    dates: true,
+  });
+
+  return {
+    contentFilter,
+    setContentFilter,
+  };
+};
+
+export default memo(ContentControl);

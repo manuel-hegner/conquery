@@ -1,27 +1,30 @@
 package com.bakdata.conquery.apiv1.query.concept.specific;
 
+import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
-
+import jakarta.validation.Valid;
 import javax.annotation.Nullable;
-import javax.validation.Valid;
 
 import com.bakdata.conquery.apiv1.query.CQElement;
 import com.bakdata.conquery.apiv1.query.Query;
 import com.bakdata.conquery.io.cps.CPSType;
-import com.bakdata.conquery.io.jackson.InternalOnly;
-import com.bakdata.conquery.models.execution.ManagedExecution;
+import com.bakdata.conquery.io.jackson.View;
+import com.bakdata.conquery.models.error.ConqueryError;
 import com.bakdata.conquery.models.identifiable.ids.specific.ManagedExecutionId;
 import com.bakdata.conquery.models.query.ManagedQuery;
+import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.QueryPlanContext;
 import com.bakdata.conquery.models.query.QueryResolveContext;
+import com.bakdata.conquery.models.query.RequiredEntities;
 import com.bakdata.conquery.models.query.Visitable;
 import com.bakdata.conquery.models.query.queryplan.ConceptQueryPlan;
 import com.bakdata.conquery.models.query.queryplan.QPNode;
-import com.bakdata.conquery.models.query.resultinfo.ResultInfoCollector;
+import com.bakdata.conquery.models.query.resultinfo.ResultInfo;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonView;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -46,17 +49,15 @@ public class CQReusedQuery extends CQElement {
 	@JsonIgnore
 	private ManagedQuery query;
 
-	@InternalOnly
+	@JsonView(View.InternalCommunication.class)
 	private Query resolvedQuery;
 
 	private boolean excludeFromSecondaryId = false;
 
 	@Override
-	public void collectRequiredQueries(Set<ManagedExecution<?>> requiredQueries) {
-		if(query != null) {
-			requiredQueries.add(query);
-			query.getQuery().collectRequiredQueries(requiredQueries);
-		}
+	public void collectRequiredQueries(Set<ManagedExecutionId> requiredQueries) {
+		// We won't look deeper into the reference query here for now
+		requiredQueries.add(queryId);
 	}
 
 	@Override
@@ -72,9 +73,11 @@ public class CQReusedQuery extends CQElement {
 
 	@Override
 	public void resolve(QueryResolveContext context) {
-		query = ((ManagedQuery) context.getDatasetRegistry().getMetaRegistry().resolve(queryId));
+		query = (ManagedQuery) context.getStorage().getExecution(queryId);
+		if (query == null) {
+			throw new ConqueryError.ExecutionCreationResolveError(queryId);
+		}
 		resolvedQuery = query.getQuery();
-
 		// Yey recursion, because the query might consist of another CQReusedQuery or CQExternal
 		resolvedQuery.resolve(context);
 	}
@@ -88,8 +91,13 @@ public class CQReusedQuery extends CQElement {
 	}
 
 	@Override
-	public void collectResultInfos(ResultInfoCollector collector) {
-		resolvedQuery.getReusableComponents().collectResultInfos(collector);
+	public List<ResultInfo> getResultInfos() {
+		return resolvedQuery.getReusableComponents().getResultInfos();
+	}
+
+	@Override
+	public RequiredEntities collectRequiredEntities(QueryExecutionContext context) {
+		return getResolvedQuery().collectRequiredEntities(context);
 	}
 
 }

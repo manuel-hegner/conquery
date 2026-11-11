@@ -1,0 +1,117 @@
+import { CopyIcon } from "lucide-react";
+import {
+  createContext,
+  Fragment,
+  memo,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useState,
+} from "react";
+import { useHotkeys } from "react-hotkeys-hook";
+import { useSelector } from "react-redux";
+import type { GetFrontendConfigResponseT } from "../api/types";
+import { Button } from "../ui-components/Button";
+import {
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+} from "../ui-components/Modal";
+import { C2 } from "../ui-components/Typography";
+import type { StateT } from "./reducers";
+
+const initialState = {
+  isOpen: false,
+  setOpen: () => {},
+};
+
+const Context = createContext<ReturnType<typeof useContextValue>>(initialState);
+
+const useContextValue = () => {
+  const [isOpen, setOpen] = useState(false);
+
+  return { isOpen, setOpen };
+};
+
+export const AboutProvider = ({ children }: { children: ReactNode }) => (
+  <Context.Provider value={useContextValue()}>{children}</Context.Provider>
+);
+
+export const useAbout = () => {
+  return useContext(Context);
+};
+
+// build-time constants, see `define` in vite.config.ts
+const frontendTimestamp = __BUILD_TIMESTAMP__;
+const frontendGitDescribe = __BUILD_GIT_DESCRIBE__;
+
+const useVersion = () => {
+  const backendVersions = useSelector<
+    StateT,
+    GetFrontendConfigResponseT["versions"]
+  >((state) => state.startup.config.versions);
+
+  return {
+    backendVersions,
+    frontendTimestamp,
+    frontendGitDescribe,
+  };
+};
+
+const AboutContent = ({ close }: { close: () => void }) => {
+  const { backendVersions, frontendTimestamp, frontendGitDescribe } =
+    useVersion();
+
+  const copyVersionToClipboard = () => {
+    navigator.clipboard.writeText(
+      `${backendVersions
+        .map(({ name, version }) => `${name}: ${version}`)
+        .join(" ")} Frontend: ${frontendGitDescribe}`,
+    );
+    close();
+  };
+
+  return (
+    <>
+      <ModalHeader>Version</ModalHeader>
+      <ModalBody>
+        <div className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-1">
+          {backendVersions.map((version) => (
+            <Fragment key={version.name}>
+              <C2>{version.name}</C2>
+              <C2 as="code">
+                {version.version || "-"}
+                {version.buildTime && ` – ${version.buildTime}`}
+              </C2>
+            </Fragment>
+          ))}
+          <C2>Frontend</C2>
+          <C2 as="code">
+            {frontendGitDescribe} – {frontendTimestamp}
+          </C2>
+        </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button intent="secondary" onPress={copyVersionToClipboard}>
+          <CopyIcon />
+          Copy version info
+        </Button>
+      </ModalFooter>
+    </>
+  );
+};
+
+export const About = memo(() => {
+  const { isOpen, setOpen } = useAbout();
+  const toggleOpen = useCallback(() => setOpen((open) => !open), [setOpen]);
+
+  // the library compares modifiers too, and "?" is a shifted key
+  useHotkeys("shift+?", toggleOpen, { useKey: true }, [toggleOpen]);
+
+  return (
+    <Modal isOpen={isOpen} onOpenChange={setOpen}>
+      {({ close }) => <AboutContent close={close} />}
+    </Modal>
+  );
+});

@@ -1,135 +1,85 @@
 package com.bakdata.conquery.io.storage;
 
-import java.io.IOException;
 import java.util.Objects;
+import java.util.stream.Stream;
 
-import javax.validation.Validator;
-
-import com.bakdata.conquery.ConqueryConstants;
+import com.bakdata.conquery.io.jackson.MutableInjectableValues;
 import com.bakdata.conquery.io.storage.xodus.stores.SingletonStore;
 import com.bakdata.conquery.models.config.StoreFactory;
+import com.bakdata.conquery.models.datasets.PreviewConfig;
 import com.bakdata.conquery.models.datasets.concepts.StructureNode;
-import com.bakdata.conquery.models.dictionary.Dictionary;
-import com.bakdata.conquery.models.dictionary.EncodedDictionary;
-import com.bakdata.conquery.models.dictionary.MapDictionary;
-import com.bakdata.conquery.models.events.stores.specific.string.StringTypeEncoded;
+import com.bakdata.conquery.models.identifiable.ids.specific.InternToExternMapperId;
+import com.bakdata.conquery.models.identifiable.ids.specific.SearchIndexId;
 import com.bakdata.conquery.models.identifiable.mapping.EntityIdMap;
+import com.bakdata.conquery.models.index.InternToExternMapper;
+import com.bakdata.conquery.models.index.search.SearchIndex;
 import com.bakdata.conquery.models.worker.WorkerToBucketsMap;
-import lombok.Getter;
-import lombok.NonNull;
-import lombok.Setter;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableList;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class NamespaceStorage extends NamespacedStorage {
+public class NamespaceStorage extends NamespacedStorageImpl {
 
-	@Getter
-	@Setter
-	@NonNull
-	private MetaStorage metaStorage;
+	protected IdentifiableStore<InternToExternMapper> internToExternMappers;
+	protected IdentifiableStore<SearchIndex> searchIndexes;
 	protected SingletonStore<EntityIdMap> idMapping;
 	protected SingletonStore<StructureNode[]> structure;
+	protected SingletonStore<PreviewConfig> preview;
 	protected SingletonStore<WorkerToBucketsMap> workerToBuckets;
 
-	protected SingletonStore<Dictionary> primaryDictionary;
 
-	@Getter
-	private final boolean registerImports = true;
-
-	public NamespaceStorage(Validator validator, String pathName) {
-		super(validator, pathName);
-	}
-
-	public EncodedDictionary getPrimaryDictionary() {
-		return new EncodedDictionary(getPrimaryDictionaryRaw(), StringTypeEncoded.Encoding.UTF8);
-	}
-
-	@NonNull
-	public Dictionary getPrimaryDictionaryRaw() {
-		final Dictionary dictionary = primaryDictionary.get();
-
-		if(dictionary == null){
-			log.trace("No prior PrimaryDictionary, creating one");
-			final MapDictionary newPrimary = new MapDictionary(getDataset(), ConqueryConstants.PRIMARY_DICTIONARY);
-
-			primaryDictionary.update(newPrimary);
-
-			return newPrimary;
-		}
-
-		return dictionary;
-	}
-
-
-	private void decorateIdMapping(SingletonStore<EntityIdMap> idMapping) {
-		idMapping
-				.onAdd(mapping -> mapping.setStorage(this));
+	public NamespaceStorage(StoreFactory storageFactory, String pathName) {
+		super(storageFactory, pathName);
 	}
 
 	@Override
-	public void openStores(StoreFactory storageFactory) {
-		super.openStores(storageFactory);
+	public void openStores(ObjectMapper objectMapper) {
+		super.openStores(objectMapper);
 
-		idMapping = storageFactory.createIdMappingStore(super.getPathName());
-		structure = storageFactory.createStructureStore(super.getPathName(), getCentralRegistry());
-		workerToBuckets = storageFactory.createWorkerToBucketsStore(super.getPathName());
-		primaryDictionary = storageFactory.createPrimaryDictionaryStore(super.getPathName(), getCentralRegistry());
-
-		decorateIdMapping(idMapping);
+		internToExternMappers = getStorageFactory().createInternToExternMappingStore(super.getPathName(), objectMapper);
+		searchIndexes = getStorageFactory().createSearchIndexStore(super.getPathName(), objectMapper);
+		idMapping = getStorageFactory().createIdMappingStore(super.getPathName(), objectMapper);
+		structure = getStorageFactory().createStructureStore(super.getPathName(), objectMapper);
+		workerToBuckets = getStorageFactory().createWorkerToBucketsStore(super.getPathName(), objectMapper);
+		preview = getStorageFactory().createPreviewStore(super.getPathName(), objectMapper);
 	}
 
 	@Override
-	public void loadData() {
-		super.loadData();
+	public ImmutableList<ManagedStore> getStores() {
+		return ImmutableList.of(
+				dataset,
 
-		idMapping.loadData();
-		structure.loadData();
-		workerToBuckets.loadData();
-		primaryDictionary.loadData();
+				internToExternMappers,
+				searchIndexes,
+
+				secondaryIds,
+				tables,
+				imports,
+
+				// Concepts depend on internToExternMappers
+				concepts,
+
+				preview,
+				idMapping,
+				structure,
+				workerToBuckets,
+				entity2Bucket
+		);
 	}
 
-	@Override
-	public void clear() {
-		super.clear();
-		idMapping.clear();
-		structure.clear();
-		workerToBuckets.clear();
-		primaryDictionary.clear();
 
-	}
-
-	@Override
-	public void removeStorage() {
-		super.removeStorage();
-		idMapping.removeStore();
-		structure.removeStore();
-		workerToBuckets.removeStore();
-		primaryDictionary.removeStore();
-
-	}
-
-	@Override
-	public void close() throws IOException {
-		super.close();
-		idMapping.close();
-		structure.close();
-		workerToBuckets.close();
-		primaryDictionary.close();
-
-	}
+	// IdMapping
 
 	public EntityIdMap getIdMapping() {
 		return idMapping.get();
 	}
 
-
-	public void updatePrimaryDictionary(Dictionary dictionary){
-		primaryDictionary.update(dictionary);
-	}
-
 	public void updateIdMapping(EntityIdMap idMapping) {
 		this.idMapping.update(idMapping);
 	}
+
+	// Bucket to Worker Assignment
 
 	public void setWorkerToBucketsMap(WorkerToBucketsMap map) {
 		workerToBuckets.update(map);
@@ -139,6 +89,20 @@ public class NamespaceStorage extends NamespacedStorage {
 		return workerToBuckets.get();
 	}
 
+	public int getNumberOfEntities() {
+		return entity2Bucket.count();
+	}
+
+
+	public boolean containsEntity(String entity) {
+		return entity2Bucket.hasKey(entity);
+	}
+
+	public void registerEntity(String entity, int bucket) {
+		entity2Bucket.update(entity, bucket);
+	}
+
+	// Structure
 
 	public StructureNode[] getStructure() {
 		return Objects.requireNonNullElseGet(structure.get(), () -> new StructureNode[0]);
@@ -146,5 +110,74 @@ public class NamespaceStorage extends NamespacedStorage {
 
 	public void updateStructure(StructureNode[] structure) {
 		this.structure.update(structure);
+	}
+
+	// InternToExternMappers
+
+	public InternToExternMapper getInternToExternMapper(InternToExternMapperId id) {
+		return getInternToExternMapperFromStorage(id);
+	}
+
+	private InternToExternMapper getInternToExternMapperFromStorage(InternToExternMapperId id) {
+		return internToExternMappers.get(id);
+	}
+
+	public void addInternToExternMapper(InternToExternMapper internToExternMapper) {
+		internToExternMappers.add(internToExternMapper);
+	}
+
+	public void removeInternToExternMapper(InternToExternMapperId id) {
+		internToExternMappers.remove(id);
+	}
+
+	public Stream<InternToExternMapper> getInternToExternMappers() {
+		return internToExternMappers.getAll();
+	}
+
+	// SearchIndices
+
+	public SearchIndex getSearchIndex(SearchIndexId id) {
+		return getSearchIndexFromStorage(id);
+	}
+
+	private SearchIndex getSearchIndexFromStorage(SearchIndexId id) {
+		return searchIndexes.get(id);
+	}
+
+	public void removeSearchIndex(SearchIndexId id) {
+		searchIndexes.remove(id);
+	}
+
+	public void addSearchIndex(SearchIndex searchIndex) {
+		searchIndexes.add(searchIndex);
+	}
+
+	public Stream<SearchIndex> getSearchIndices() {
+		return searchIndexes.getAll();
+	}
+
+	public Stream<SearchIndexId> getSearchIndexIds() {
+		return searchIndexes.getAllKeys().map(SearchIndexId.class::cast);
+	}
+
+	// PreviewConfig
+
+	public PreviewConfig getPreviewConfig() {
+		return preview.get();
+	}
+
+	public void setPreviewConfig(PreviewConfig previewConfig){
+		preview.update(previewConfig);
+	}
+
+	public void removePreviewConfig() {
+		preview.remove();
+	}
+
+	// Utilities
+
+	@Override
+	public MutableInjectableValues inject(MutableInjectableValues values) {
+		return super.inject(values).add(NamespaceStorage.class, this);
 	}
 }

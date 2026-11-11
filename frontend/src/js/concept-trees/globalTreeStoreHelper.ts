@@ -1,9 +1,13 @@
-import type { ConceptT, TableT, SelectorT, ConceptIdT } from "../api/types";
-import { includes } from "../common/helpers";
+import type { ConceptIdT, ConceptT, GetConceptResponseT } from "../api/types";
 import { exists } from "../common/helpers/exists";
-import { nodeIsElement } from "../model/node";
-import { selectsWithDefaults } from "../model/select";
-import { tablesWithDefaults } from "../model/table";
+import { type NodeResetConfig, nodeIsElement } from "../model/node";
+import { resetSelects } from "../model/select";
+import { resetTables } from "../model/table";
+import type {
+  DragItemConceptTreeNode,
+  SelectedSelectorT,
+  TableWithFilterValueT,
+} from "../standard-query-editor/types";
 
 import type { TreesT } from "./reducer";
 import { findConcepts } from "./search";
@@ -28,7 +32,7 @@ export function resetAllTrees() {
 export function setTree(
   rootConcept: ConceptT,
   treeId: ConceptIdT,
-  tree: ConceptT,
+  tree: GetConceptResponseT,
 ): void {
   // This replaces the root concept with the one loaded initially (at /concepts)
   const concepts: Record<string, ConceptT> = {
@@ -42,16 +46,23 @@ export function setTree(
 //
 // GETTER
 //
-export function getConceptById(conceptId?: ConceptIdT): ConceptT | null {
-  const keys: ConceptIdT[] = Object.keys(window.conceptTrees);
+export function getConceptById(
+  conceptId: ConceptIdT,
+  rootId?: ConceptIdT,
+): ConceptT | undefined {
+  if (rootId) {
+    return window.conceptTrees[rootId]?.[conceptId];
+  }
 
-  for (let i = 0; i < keys.length; i++) {
-    const concept = window.conceptTrees[keys[i]][conceptId];
+  const conceptTreeRootIds: ConceptIdT[] = Object.keys(window.conceptTrees);
+
+  for (const rootId of conceptTreeRootIds) {
+    const concept = window.conceptTrees[rootId][conceptId];
 
     if (concept) return concept;
   }
 
-  return null;
+  return undefined;
 }
 
 //
@@ -77,14 +88,7 @@ const findParentConcepts = (
   ]);
 };
 
-interface ConceptsByIds {
-  concepts: ConceptT[];
-  root: ConceptIdT;
-  tables: TableT[];
-  selects?: SelectorT[];
-}
-
-const findRootConceptFromNodeIds = (
+const findRootConceptIdFromConceptIds = (
   rootConcepts: TreesT,
   conceptIds: ConceptIdT[],
 ) => {
@@ -94,7 +98,7 @@ const findRootConceptFromNodeIds = (
     concept: ConceptT;
     id: ConceptIdT;
   }[] = conceptIds
-    .map((id) => ({ concept: getConceptById(id), id }))
+    .map((id) => ({ id, concept: getConceptById(id) }))
     .filter((d): d is { concept: ConceptT; id: string } => !!d.concept);
 
   if (conceptsWithIds.length !== conceptIds.length) return null;
@@ -104,15 +108,26 @@ const findRootConceptFromNodeIds = (
   );
 
   return Object.keys(rootConcepts).find(
-    (id) => includes(parentConceptIds, id) && nodeIsElement(rootConcepts[id]),
+    (id) => parentConceptIds.includes(id) && nodeIsElement(rootConcepts[id]),
   );
 };
+
+interface ConceptsByIds {
+  concepts: ConceptT[];
+  root: ConceptIdT;
+  tables: TableWithFilterValueT[];
+  selects?: SelectedSelectorT[];
+}
 
 export const getConceptsByIdsWithTablesAndSelects = (
   rootConcepts: TreesT,
   conceptIds: ConceptIdT[],
+  resetConfig: NodeResetConfig,
 ): ConceptsByIds | null => {
-  const rootConceptId = findRootConceptFromNodeIds(rootConcepts, conceptIds);
+  const rootConceptId = findRootConceptIdFromConceptIds(
+    rootConcepts,
+    conceptIds,
+  );
 
   // There should only be one exact root node that has table information
   // If it's more or less than one, something went wrong
@@ -129,21 +144,23 @@ export const getConceptsByIdsWithTablesAndSelects = (
   }
 
   const selects = rootConcept.selects
-    ? { selects: selectsWithDefaults(rootConcept.selects) }
+    ? { selects: resetSelects(rootConcept.selects, resetConfig) }
     : {};
 
   return {
     concepts: conceptIds.map((id) => getConceptById(id)).filter(exists),
     root: rootConceptId,
-    tables: tablesWithDefaults(rootConcept.tables),
+    tables: rootConcept.tables
+      ? resetTables(rootConcept.tables, resetConfig)
+      : [],
     ...selects,
   };
 };
 
-export const hasConceptChildren = (node: ConceptT): boolean => {
+export const hasConceptChildren = (node: DragItemConceptTreeNode): boolean => {
   if (!node) return false;
 
-  const concept = getConceptById(node.ids);
+  const concept = getConceptById(node.ids[0]);
 
   return !!concept && !!concept.children && concept.children.length > 0;
 };
@@ -163,26 +180,25 @@ export const globalSearch = async (trees: TreesT, query: string) => {
   //
   // TODO: Refactor the state and keep both root trees as well as concept trees in a single format
   //       Then simply use that here
-  const formattedTrees = Object.keys(trees).reduce((all, key) => {
-    all[key] = { [key]: trees[key] };
-
-    return all;
-  }, {});
+  const formattedTrees = Object.fromEntries(
+    Object.entries(trees).map(([key, value]) => [key, { [key]: value }]),
+  );
   const combinedTrees = Object.assign({}, formattedTrees, window.conceptTrees);
 
   const result = Object.keys(combinedTrees)
     .filter((key) => !combinedTrees[key].parent)
-    .reduce(
-      (all, key) => ({
-        ...all,
-        ...findConcepts(
-          combinedTrees,
-          key,
-          key,
-          combinedTrees[key][key],
-          lowerQuery,
+    .reduce<Record<ConceptIdT, number>>(
+      (all, key) =>
+        Object.assign(
+          all,
+          findConcepts(
+            combinedTrees,
+            key,
+            key,
+            combinedTrees[key][key],
+            lowerQuery,
+          ),
         ),
-      }),
       {},
     );
 

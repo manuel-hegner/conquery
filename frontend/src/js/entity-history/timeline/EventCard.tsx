@@ -1,0 +1,221 @@
+import { EuroIcon, FingerprintPatternIcon, InfoIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+import type { ColumnDescription, ConceptIdT } from "../../api/types";
+import { exists } from "../../common/helpers/exists";
+import { useMoneyFormatter } from "../../common/useMoneyFormatter";
+import { Card } from "../../ui-components/Card";
+import { Highlighter } from "../../ui-components/Highlighter";
+import {
+  Tooltip,
+  TooltipTarget,
+  TooltipTrigger,
+} from "../../ui-components/Tooltip";
+import { C3 } from "../../ui-components/Typography";
+import type { ContentFilterValue } from "../ContentControl";
+import { RowDates } from "../RowDates";
+import type { DateRow, EntityEvent } from "../reducer";
+import { useTimelineSearch } from "../timeline-search/timelineSearchState";
+import GroupedContent from "./GroupedContent";
+import { RawDataBadge } from "./RawDataBadge";
+import { TinyLabel } from "./TinyLabel";
+import type { ColumnBuckets } from "./util/useColumnInformation";
+import { isDateColumn, isSourceColumn } from "./util/util";
+
+const card = tv({
+  base: ["relative", "grid grid-cols-[auto_45px_1fr]", "gap-[3px]", "py-[5px]"],
+});
+
+const eventItemContent = tv({ base: ["flex flex-col", "gap-5"] });
+
+const colBucket = tv({
+  base: [
+    "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))]",
+    "gap-x-[10px] gap-y-[3px]",
+    "w-full",
+    "px-1 py-px",
+  ],
+});
+
+const flex = tv({ base: ["flex items-start", "gap-[5px]"] });
+
+const rawDataBadge = tv({
+  base: ["absolute top-[4px] left-[55px]", "z-1"],
+});
+
+const bucketIcon = tv({
+  base: ["w-6", "mx-[5px] my-2", "text-primary-500"],
+});
+
+const bullet = tv({
+  base: [
+    "h-[10px] w-[10px]",
+    "my-[2px]",
+    "bg-primary-500",
+    "rounded-full",
+    "shrink-0",
+  ],
+});
+
+const EventCard = ({
+  row,
+  columns,
+  dateColumn,
+  sourceColumn,
+  columnBuckets,
+  contentFilter,
+  rootConceptIdsByColumn,
+  groupedRows,
+  groupedRowsKeysWithDifferentValues,
+}: {
+  row: EntityEvent;
+  columns: Record<string, ColumnDescription>;
+  dateColumn: ColumnDescription;
+  sourceColumn: ColumnDescription;
+  columnBuckets: ColumnBuckets;
+  contentFilter: ContentFilterValue;
+  rootConceptIdsByColumn: Record<string, ConceptIdT>;
+  groupedRows?: EntityEvent[];
+  groupedRowsKeysWithDifferentValues?: string[];
+}) => {
+  const { searchTerm } = useTimelineSearch();
+  const { t } = useTranslation();
+  const moneyFormatter = useMoneyFormatter();
+
+  const applicableGroupableIds = columnBuckets.groupableIds.filter(
+    (column) =>
+      exists(row[column.label]) &&
+      !isDateColumn(column) && // Because they're already displayed somewhere else
+      !isSourceColumn(column), // Because they're already displayed somewhere else
+  );
+  const groupableIdsTooltip = t("history.content.fingerprint");
+
+  const applicableMoney = columnBuckets.money.filter((column) =>
+    exists(row[column.label]),
+  );
+  const moneyTooltip = t("history.content.money");
+
+  const applicableRest = columnBuckets.rest.filter((column) =>
+    exists(row[column.label]),
+  );
+  const restTooltip = t("history.content.rest");
+
+  return (
+    <div className={card()}>
+      <div className={bullet()} />
+      <RowDates dates={row[dateColumn.label] as DateRow} />
+      <RawDataBadge
+        className={rawDataBadge()}
+        event={row}
+        sourceColumn={sourceColumn}
+      />
+      <div className="mt-[5px] min-w-0">
+        <Card>
+          <div className={eventItemContent()}>
+            {contentFilter.money && applicableMoney.length > 0 && (
+              <div className={flex()}>
+                <TooltipTrigger>
+                  <TooltipTarget
+                    role="img"
+                    aria-label={moneyTooltip}
+                    excludeFromTabOrder
+                  >
+                    <EuroIcon className={bucketIcon()} />
+                  </TooltipTarget>
+                  <Tooltip>{moneyTooltip}</Tooltip>
+                </TooltipTrigger>
+                <div className={colBucket()}>
+                  {applicableMoney.map((column) => (
+                    <div key={column.label}>
+                      <TinyLabel>{column.defaultLabel}</TinyLabel>
+                      <C3 as="code">
+                        {moneyFormatter.format(
+                          parseFloat(row[column.label] as string),
+                        )}
+                      </C3>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {groupedRowsKeysWithDifferentValues && groupedRows && (
+              <GroupedContent
+                columns={columns}
+                contentFilter={contentFilter}
+                groupedRows={groupedRows}
+                groupedRowsKeysWithDifferentValues={
+                  groupedRowsKeysWithDifferentValues
+                }
+                rootConceptIdsByColumn={rootConceptIdsByColumn}
+              />
+            )}
+            {contentFilter.rest && applicableRest.length > 0 && (
+              <div className={flex()}>
+                <TooltipTrigger>
+                  <TooltipTarget
+                    role="img"
+                    aria-label={restTooltip}
+                    excludeFromTabOrder
+                  >
+                    <InfoIcon className={bucketIcon()} />
+                  </TooltipTarget>
+                  <Tooltip>{restTooltip}</Tooltip>
+                </TooltipTrigger>
+                <div className={colBucket()}>
+                  {applicableRest.map((column) => (
+                    <div key={column.label}>
+                      <TinyLabel>{column.defaultLabel}</TinyLabel>
+                      <C3 as="span">
+                        {searchTerm && searchTerm.length > 0 ? (
+                          <Highlighter
+                            searchWords={searchTerm.split(" ")}
+                            textToHighlight={row[column.label] as string}
+                          />
+                        ) : (
+                          (row[column.label] as string)
+                        )}
+                      </C3>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {contentFilter.groupId && applicableGroupableIds.length > 0 && (
+              <div className={flex()}>
+                <TooltipTrigger>
+                  <TooltipTarget
+                    role="img"
+                    aria-label={groupableIdsTooltip}
+                    excludeFromTabOrder
+                  >
+                    <FingerprintPatternIcon className={bucketIcon()} />
+                  </TooltipTarget>
+                  <Tooltip>{groupableIdsTooltip}</Tooltip>
+                </TooltipTrigger>
+                <div className={colBucket()}>
+                  {applicableGroupableIds.map((column) => (
+                    <div key={column.label}>
+                      <TinyLabel>{column.defaultLabel}</TinyLabel>
+                      <C3 as="span">
+                        {searchTerm && searchTerm.length > 0 ? (
+                          <Highlighter
+                            searchWords={searchTerm.split(" ")}
+                            textToHighlight={row[column.label] as string}
+                          />
+                        ) : (
+                          (row[column.label] as string)
+                        )}
+                      </C3>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default EventCard;

@@ -10,11 +10,14 @@ import com.bakdata.conquery.models.datasets.Dataset;
 import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.EmptyBucket;
+import com.bakdata.conquery.models.identifiable.ids.specific.BucketId;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.aggregators.Aggregator;
 import com.bakdata.conquery.models.query.results.SinglelineEntityResult;
 import com.bakdata.conquery.util.QueryUtils;
+import com.codahale.metrics.Meter;
+import com.codahale.metrics.SharedMetricRegistries;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
@@ -26,15 +29,27 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ConceptQueryPlan implements QueryPlan<SinglelineEntityResult> {
 
+	private static final Meter INTERESTING_ENTITY = SharedMetricRegistries.getDefault().meter("queries.interest.entity.true");
+	private static final Meter INTERESTING_BUCKET = SharedMetricRegistries.getDefault().meter("queries.interest.bucket.true");
+	private static final Meter NOT_INTERESTING_ENTITY = SharedMetricRegistries.getDefault().meter("queries.interest.entity.false");
+	private static final Meter NOT_INTERESTING_BUCKET = SharedMetricRegistries.getDefault().meter("queries.interest.bucket.false");
+
+
 	public static final int VALIDITY_DATE_POSITION = 0;
 
+
+	@ToString.Exclude
 	@Getter
 	private final ThreadLocal<Set<Table>> requiredTables = ThreadLocal.withInitial(this::collectRequiredTables);
 
 	private QPNode child;
+
 	@ToString.Exclude
 	protected final List<Aggregator<?>> aggregators = new ArrayList<>();
+
+	@ToString.Exclude
 	private Entity entity;
+
 	private DateAggregator dateAggregator = new DateAggregator(DateAggregationAction.MERGE);
 
 	public ConceptQueryPlan(boolean generateDateAggregator) {
@@ -49,8 +64,8 @@ public class ConceptQueryPlan implements QueryPlan<SinglelineEntityResult> {
 		child.init(entity, ctx);
 	}
 
-	public void nextEvent(Bucket bucket, int event) {
-		getChild().acceptEvent(bucket, event);
+	public boolean nextEvent(Bucket bucket, int event) {
+		return getChild().acceptEvent(bucket, event);
 	}
 
 	protected SinglelineEntityResult createResult() {
@@ -86,27 +101,22 @@ public class ConceptQueryPlan implements QueryPlan<SinglelineEntityResult> {
 
 			nextTable(ctx, currentTable);
 
-			final List<Bucket> tableBuckets = ctx.getBucketManager().getEntityBucketsForTable(entity, currentTable);
+			final Set<BucketId> tableBuckets = ctx.getEntityBucketsForTable(entity, currentTable.getId());
 
 			log.trace("Table[{}] has {} buckets for Entity[{}]", currentTable, tableBuckets, entity);
 
-			for (Bucket bucket : tableBuckets) {
-
-				if (bucket == null) {
-					continue;
-				}
-
-				if (!bucket.containsEntity(entity.getId())) {
-					continue;
-				}
+			for (BucketId bucketId : tableBuckets) {
+				Bucket bucket = bucketId.resolve();
 
 				if (!isOfInterest(bucket)) {
 					continue;
 				}
 
 				nextBlock(bucket);
+
 				int start = bucket.getEntityStart(entity.getId());
 				int end = bucket.getEntityEnd(entity.getId());
+
 				for (int event = start; event < end; event++) {
 					nextEvent(bucket, event);
 				}
@@ -118,6 +128,7 @@ public class ConceptQueryPlan implements QueryPlan<SinglelineEntityResult> {
 		}
 		return Optional.empty();
 	}
+
 
 	public void nextTable(QueryExecutionContext ctx, Table currentTable) {
 		child.nextTable(ctx, currentTable);
@@ -141,7 +152,24 @@ public class ConceptQueryPlan implements QueryPlan<SinglelineEntityResult> {
 
 	@Override
 	public boolean isOfInterest(Entity entity) {
-		return !getRequiredTables().get().isEmpty() && child.isOfInterest(entity);
+		final boolean interesting = !getRequiredTables().get().isEmpty() && child.isOfInterest(entity);
+
+		reportEntityInterest(interesting);
+
+		return interesting;
+	}
+
+	private void reportEntityInterest(boolean interesting) {
+		if (!log.isTraceEnabled()) {
+			return;
+		}
+
+		if (interesting) {
+			INTERESTING_ENTITY.mark();
+		}
+		else {
+			NOT_INTERESTING_ENTITY.mark();
+		}
 	}
 
 	@Override
@@ -159,12 +187,28 @@ public class ConceptQueryPlan implements QueryPlan<SinglelineEntityResult> {
 	}
 
 	public boolean isOfInterest(Bucket bucket) {
-		return child.isOfInterest(bucket);
+		final boolean interesting = bucket.containsEntity(entity.getId()) && child.isOfInterest(bucket);
+
+		reportBucketInterest(interesting);
+
+		return interesting;
+	}
+
+	private void reportBucketInterest(boolean interesting) {
+		if (!log.isTraceEnabled()) {
+			return;
+		}
+
+		if (interesting) {
+			INTERESTING_BUCKET.mark();
+		}
+		else {
+			NOT_INTERESTING_BUCKET.mark();
+		}
 	}
 
 	public Set<Table> collectRequiredTables() {
 		return child.collectRequiredTables();
 	}
-
 
 }

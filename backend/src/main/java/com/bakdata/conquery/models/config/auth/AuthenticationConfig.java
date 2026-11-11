@@ -1,16 +1,13 @@
 package com.bakdata.conquery.models.config.auth;
 
+import jakarta.validation.constraints.NotNull;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.core.NewCookie;
+
 import com.bakdata.conquery.models.auth.web.AuthCookieFilter;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.dropwizard.util.Duration;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-
-import javax.validation.constraints.NotNull;
-import javax.ws.rs.container.ContainerRequestContext;
-import javax.ws.rs.core.Cookie;
-import javax.ws.rs.core.NewCookie;
-import java.util.concurrent.atomic.AtomicReference;
 
 @NoArgsConstructor
 @Getter
@@ -19,11 +16,6 @@ public class AuthenticationConfig {
 	// Define a maximum age since most browsers use session restoring making session cookies virtual permanent (see https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies)
 	@NotNull
 	private Duration adminEndCookieDuration = Duration.hours(1);
-
-	@JsonIgnore
-	private AtomicReference<AuthCookieFilter> authCookieFilter = new AtomicReference<>();
-
-
 
 
 	public NewCookie createAuthCookie(ContainerRequestContext request, String token) {
@@ -41,9 +33,9 @@ public class AuthenticationConfig {
 		);
 	}
 
-	public static NewCookie expireAuthCookie() {
+	public static NewCookie expireCookie(String cookieName) {
 		return new NewCookie(
-				AuthCookieFilter.ACCESS_TOKEN,
+				cookieName,
 				null,
 				"/",
 				null,
@@ -53,10 +45,4 @@ public class AuthenticationConfig {
 		);
 	}
 
-	@JsonIgnore
-	public AuthCookieFilter getAuthCookieFilter() {
-		return authCookieFilter.updateAndGet(
-				(f) -> f != null ? f : new AuthCookieFilter(this::createAuthCookie)
-		);
-	}
 }

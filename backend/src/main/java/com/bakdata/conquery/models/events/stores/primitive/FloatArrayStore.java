@@ -1,6 +1,7 @@
 package com.bakdata.conquery.models.events.stores.primitive;
 
 import com.bakdata.conquery.io.cps.CPSType;
+import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.stores.root.ColumnStore;
 import com.bakdata.conquery.models.events.stores.root.RealStore;
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -32,6 +33,12 @@ public class FloatArrayStore implements RealStore {
 		return new FloatArrayStore(new float[size]);
 	}
 
+
+	@Override
+	public FloatArrayStore createDescription() {
+		return ColumnStore.emptyCopy(this);
+	}
+
 	@Override
 	public long estimateEventBits() {
 		return Float.SIZE;
@@ -45,6 +52,7 @@ public class FloatArrayStore implements RealStore {
 	public void setReal(int event, double value) {
 		values[event] = (float) value;
 	}
+
 	@Override
 	public void setNull(int event) {
 		values[event] = nullValue;
@@ -58,5 +66,9 @@ public class FloatArrayStore implements RealStore {
 	@Override
 	public double getReal(int event) {
 		return values[event];
+	}
+
+	public void setParent(Bucket bucket) {
+		// not used
 	}
 }

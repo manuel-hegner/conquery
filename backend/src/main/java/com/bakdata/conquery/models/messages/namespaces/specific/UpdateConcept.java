@@ -1,7 +1,7 @@
 package com.bakdata.conquery.models.messages.namespaces.specific;
 
-import javax.validation.Validator;
-import javax.validation.constraints.NotNull;
+import jakarta.validation.Validator;
+import jakarta.validation.constraints.NotNull;
 
 import com.bakdata.conquery.io.cps.CPSType;
 import com.bakdata.conquery.models.datasets.concepts.Concept;
@@ -23,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 @CPSType(id="UPDATE_CONCEPT", base=NamespacedMessage.class)
 @RequiredArgsConstructor(onConstructor_=@JsonCreator) @Getter @Setter @ToString
 @Slf4j
-public class UpdateConcept extends WorkerMessage.Slow {
+public class UpdateConcept extends WorkerMessage {
 
 	private final Concept<?> concept;
 
@@ -32,7 +32,7 @@ public class UpdateConcept extends WorkerMessage.Slow {
 	@JsonIgnore
 	@NotNull
 	private Validator validator;
-	
+
 	@Override
 	public void react(Worker context) throws Exception {
 		ValidatorHelper.failOnError(log, validator.validate(concept));

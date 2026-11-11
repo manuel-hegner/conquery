@@ -1,13 +1,13 @@
-import styled from "@emotion/styled";
-import { StateT } from "app-types";
-import React, { FC } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSelector, useDispatch } from "react-redux";
-
-import TransparentButton from "../button/TransparentButton";
-import AnimatedDots from "../common/components/AnimatedDots";
+import { useDispatch, useSelector } from "react-redux";
+import { tv } from "tailwind-variants";
+import type { StateT } from "../app/reducers";
 import ConceptTreesOpenButtons from "../concept-trees-open/ConceptTreesOpenButtons";
-import SearchBar from "../search-bar/SearchBar";
+import AnimatedDots from "../ui-components/AnimatedDots";
+import { Button } from "../ui-components/Button";
+import { SearchField } from "../ui-components/SearchField";
+import { C3 } from "../ui-components/Typography";
 
 import {
   clearSearchQuery,
@@ -16,46 +16,15 @@ import {
 } from "./actions";
 import type { SearchT, TreesT } from "./reducer";
 
-const Root = styled("div")`
-  position: relative;
-`;
+const root = tv({ base: "relative" });
 
-const TinyText = styled("p")`
-  margin: 3px 0;
-  font-size: ${({ theme }) => theme.font.xs};
-  color: ${({ theme }) => theme.col.gray};
-`;
+const tinyText = tv({ base: "my-[3px]" });
 
-const Row = styled("div")`
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-`;
+const row = tv({
+  base: "flex flex-row items-center justify-between",
+});
 
-const Displaying = styled("span")`
-  font-size: ${({ theme }) => theme.font.xs};
-  text-transform: uppercase;
-  color: ${({ theme }) => theme.col.gray};
-`;
-
-const StyledButton = styled(TransparentButton)`
-  margin: 3px 0 3px 5px;
-`;
-
-const TopRow = styled("div")`
-  display: flex;
-  align-items: center;
-`;
-const SxConceptTreeOpenButtons = styled(ConceptTreesOpenButtons)`
-  margin-right: 5px;
-`;
-
-interface PropsT {
-  className?: string;
-}
-
-const ConceptTreeSearchBox: FC<PropsT> = ({ className }) => {
+const ConceptTreeSearchBox = ({ className }: { className?: string }) => {
   const showMismatches = useSelector<StateT, boolean>(
     (state) => state.conceptTrees.search.showMismatches,
   );
@@ -65,58 +34,86 @@ const ConceptTreeSearchBox: FC<PropsT> = ({ className }) => {
   const trees = useSelector<StateT, TreesT>(
     (state) => state.conceptTrees.trees,
   );
+  const treesRef = useRef(trees);
+  treesRef.current = trees;
 
   const dispatch = useDispatch();
   const { t } = useTranslation();
 
   const searchTrees = useSearchTrees();
-  const onSearch = (trees: TreesT, searchString: string) => {
-    if (searchString.length > 1) {
-      searchTrees(trees, searchString);
-    }
-  };
-  const onClearQuery = () => dispatch(clearSearchQuery());
+  const onSearch = useCallback(
+    (searchString: string) => {
+      if (searchString.length > 1) {
+        searchTrees(treesRef.current, searchString);
+      }
+    },
+    [searchTrees],
+  );
+  const onClearQuery = useCallback(
+    () => dispatch(clearSearchQuery()),
+    [dispatch],
+  );
   const onToggleShowMismatches = () => dispatch(toggleShowMismatches());
 
+  const [term, setTerm] = useState(search.query ?? "");
+  useEffect(() => {
+    setTerm(search.query ?? "");
+  }, [search.query]);
+
+  const placeholder = t("conceptTreeList.searchPlaceholder");
+
   return (
-    <Root className={className}>
-      <TopRow>
-        <SxConceptTreeOpenButtons />
-        <SearchBar
-          searchTerm={search.query}
-          placeholder={t("conceptTreeList.searchPlaceholder")}
-          onClear={onClearQuery}
-          onSearch={(value) => onSearch(trees, value)}
-        />
-      </TopRow>
+    <div className={root({ className })}>
+      <div className="flex items-center gap-[5px]">
+        <ConceptTreesOpenButtons />
+        <div className="grow">
+          <SearchField
+            aria-label={placeholder}
+            placeholder={placeholder}
+            value={term}
+            onChange={(value) => {
+              setTerm(value);
+              if (!value) onClearQuery();
+            }}
+            onSubmit={onSearch}
+            onClear={onClearQuery}
+          />
+        </div>
+      </div>
       {search.loading ? (
         <AnimatedDots />
       ) : (
         search.result &&
         search.resultCount >= 0 && (
-          <Row>
-            <TinyText>
-              {t("search.resultLabel", {
-                totalResults: search.resultCount,
-                duration: (search.duration / 1000.0).toFixed(2),
-              })}
-            </TinyText>
-            <div>
-              <Displaying>
+          <div className={row()}>
+            <div className={tinyText()}>
+              <C3 tone="muted">
+                {t("search.resultLabel", {
+                  totalResults: search.resultCount,
+                  duration: (search.duration / 1000.0).toFixed(2),
+                })}
+              </C3>
+            </div>
+            <div className="my-[3px] flex items-center gap-[5px]">
+              <C3 as="span" tone="muted">
                 {showMismatches
                   ? t("conceptTreeList.showingMismatches")
                   : t("conceptTreeList.showingMatchesOnly")}
-              </Displaying>
-              <StyledButton tiny onClick={onToggleShowMismatches}>
+              </C3>
+              <Button
+                intent="secondary"
+                size="sm"
+                onPress={onToggleShowMismatches}
+              >
                 {showMismatches
                   ? t("conceptTreeList.showMatchesOnly")
                   : t("conceptTreeList.showMismatches")}
-              </StyledButton>
+              </Button>
             </div>
-          </Row>
+          </div>
         )
       )}
-    </Root>
+    </div>
   );
 };
 

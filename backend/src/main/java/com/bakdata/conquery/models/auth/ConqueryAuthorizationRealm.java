@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import com.bakdata.conquery.io.storage.MetaStorage;
+import com.bakdata.conquery.models.auth.entities.Subject;
 import com.bakdata.conquery.models.identifiable.ids.specific.UserId;
 import com.google.common.collect.Sets;
 import lombok.RequiredArgsConstructor;
@@ -25,9 +26,9 @@ import org.apache.shiro.subject.PrincipalCollection;
  */
 @RequiredArgsConstructor
 public class ConqueryAuthorizationRealm extends AuthorizingRealm {
-	
+
 	public final MetaStorage storage;
-	
+
 	@Override
 	protected void onInit() {
 		super.onInit();
@@ -42,11 +43,11 @@ public class ConqueryAuthorizationRealm extends AuthorizingRealm {
 	@Override
 	protected AuthorizationInfo doGetAuthorizationInfo(PrincipalCollection principals) {
 		Objects.requireNonNull(principals, "No principal info was provided");
-		UserId userId = (UserId) principals.getPrimaryPrincipal();
+		Subject subject = principals.oneByType(Subject.class);
 		SimpleAuthorizationInfo info = new ConqueryAuthorizationInfo();
 
-		info.addObjectPermissions(Collections.unmodifiableSet(storage.getUser(userId).getEffectivePermissions()));
-		
+		info.addObjectPermissions(Collections.unmodifiableSet(subject.getUser().getEffectivePermissions()));
+
 		return info;
 	}
 
@@ -55,7 +56,7 @@ public class ConqueryAuthorizationRealm extends AuthorizingRealm {
 		// This Realm only authorizes
 		return null;
 	}
-	
+
 	/**
 	 * Dummy class for the TokenClass that is signals that this realm does not authenticate.
 	 */
@@ -71,12 +72,12 @@ public class ConqueryAuthorizationRealm extends AuthorizingRealm {
 		public Object getCredentials() {
 			throw new UnsupportedOperationException(String.format("This realm (%s) only handles authorization. So this token's functions should never be called.", this.getClass().getName()));
 		}
-		
+
 	}
-	
+
 	/**
 	 * This AuthorizationInfo handles the collection of large amounts of {@link Permission}s by wrapping collections into a view
-	 * instead of running an iterator over them. This also prevents a {@link ConcurrentModificationException} which occurred when 
+	 * instead of running an iterator over them. This also prevents a {@link ConcurrentModificationException} which occurred when
 	 * Permission were collected
 	 */
 	@SuppressWarnings("serial")
@@ -85,27 +86,27 @@ public class ConqueryAuthorizationRealm extends AuthorizingRealm {
 		public void addRole(String role) {
 			throw new UnsupportedOperationException();
 		}
-		
+
 		@Override
 		public void addRoles(Collection<String> roles) {
 			throw new UnsupportedOperationException();
 		}
-		
+
 		@Override
 		public void addStringPermission(String permission) {
 			throw new UnsupportedOperationException();
 		}
-		
+
 		@Override
 		public void addStringPermissions(Collection<String> permissions) {
 			throw new UnsupportedOperationException();
 		}
-		
+
 		@Override
 		public void addObjectPermission(Permission permission) {
 			throw new UnsupportedOperationException();
 		}
-		
+
 		@Override
 		public void addObjectPermissions(Collection<Permission> permissions) {
 			if (!(permissions instanceof Set)) {
@@ -117,7 +118,7 @@ public class ConqueryAuthorizationRealm extends AuthorizingRealm {
 			}
 			objectPermissions = Sets.union(objectPermissions, (Set<Permission>)permissions);
 		}
-		
+
 	}
 
 	// We override this to work only on SetViews and allocate new sets

@@ -1,98 +1,135 @@
-import styled from "@emotion/styled";
-import React, { ReactNode } from "react";
-import { DropTargetMonitor } from "react-dnd";
-
-import IconButton from "../../button/IconButton";
-import InfoTooltip from "../../tooltip/InfoTooltip";
-import Dropzone, {
+import { XIcon } from "lucide-react";
+import type { ReactNode, Ref } from "react";
+import type { DropTargetMonitor } from "react-dnd";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+import { Button } from "../../ui-components/Button";
+import type {
   ChildArgs,
   PossibleDroppableObject,
 } from "../../ui-components/Dropzone";
 import DropzoneWithFileInput, {
-  DragItemFile,
+  type DragItemFile,
 } from "../../ui-components/DropzoneWithFileInput";
-import Label from "../../ui-components/Label";
-import Optional from "../../ui-components/Optional";
+import { Label } from "../../ui-components/Label";
 
-const ListItem = styled("div")`
-  position: relative;
-  padding: 5px;
-  box-shadow: 0 0 3px 0 rgba(0, 0, 0, 0.1);
-  background-color: white;
-  border-radius: ${({ theme }) => theme.borderRadius};
-  margin-bottom: 5px;
-`;
+import DropzoneBetweenElements from "./DropzoneBetweenElements";
 
-const StyledIconButton = styled(IconButton)`
-  position: absolute;
-  top: 0;
-  right: 0;
-`;
+const listItem = tv({
+  base: [
+    "relative",
+    "p-[5px]",
+    "mb-[5px]",
+    "bg-white",
+    "rounded",
+    "shadow-[0_0_3px_0_rgba(0,0,0,0.1)]",
+  ],
+});
 
-const Row = styled("div")`
-  display: flex;
-  align-items: center;
-`;
+const betweenDropzone = tv({
+  variants: {
+    first: { true: "top-[3px]" },
+  },
+});
+
+const lastBetweenDropzone = tv({
+  base: ["-top-[5px]", "h-[15px]"],
+});
 
 interface PropsT<DroppableObject> {
   className?: string;
   label?: ReactNode;
   tooltip?: string;
-  optional?: boolean;
-  dropzoneChildren: (args: ChildArgs) => ReactNode;
+  dropzoneChildren: (args: ChildArgs<DroppableObject>) => ReactNode;
   items: ReactNode[];
   acceptedDropTypes: string[];
+  onDelete: (idx: number) => void;
+  disallowMultipleColumns?: boolean;
   onDrop: (
     props: DroppableObject | DragItemFile,
     monitor: DropTargetMonitor,
   ) => void;
-  onDropFile?: (file: File) => void;
-  onDelete: (idx: number) => void;
-  disallowMultipleColumns?: boolean;
+  onDropFile: (file: File) => void;
+  onImportLines: (lines: string[], filename?: string) => void;
+  dropBetween: (
+    i: number,
+  ) => (item: PossibleDroppableObject, monitor: DropTargetMonitor) => void;
 }
 
-const DropzoneList = <DroppableObject extends PossibleDroppableObject>(
-  props: PropsT<DroppableObject>,
-) => {
+const DropzoneList = <DroppableObject extends PossibleDroppableObject>({
+  className,
+  label,
+  tooltip,
+  dropzoneChildren,
+  items,
+  acceptedDropTypes,
+  onDelete,
+  disallowMultipleColumns,
+  onDrop,
+  onImportLines,
+  dropBetween,
+  ref,
+}: PropsT<DroppableObject> & { ref?: Ref<HTMLDivElement> }) => {
+  const { t } = useTranslation();
   // allow at least one column
   const showDropzone =
-    (props.items && props.items.length === 0) || !props.disallowMultipleColumns;
-
-  const DropzoneClass = props.onDropFile ? DropzoneWithFileInput : Dropzone;
+    (items && items.length === 0) || !disallowMultipleColumns;
 
   return (
-    <div className={props.className}>
-      <Row>
-        {props.label && (
-          <Label>
-            {props.optional && <Optional />}
-            {props.label}
-          </Label>
-        )}
-        {props.tooltip && <InfoTooltip text={props.tooltip} />}
-      </Row>
-      {props.items && props.items.length > 0 && (
-        <div>
-          {props.items.map((item, i) => (
-            <ListItem key={i}>
-              <StyledIconButton
-                icon="times"
-                onClick={() => props.onDelete(i)}
-              />
-              {item}
-            </ListItem>
+    <div className={className}>
+      {label && (
+        <Label elementType="span" tooltip={tooltip}>
+          {label}
+        </Label>
+      )}
+      {items && items.length > 0 && (
+        <>
+          {items.map((item, i) => (
+            <div className="relative" key={i}>
+              {!disallowMultipleColumns && (
+                <DropzoneBetweenElements
+                  className={betweenDropzone({ first: i === 0 })}
+                  acceptedDropTypes={acceptedDropTypes}
+                  onDrop={dropBetween(i)}
+                />
+              )}
+              <div className={listItem()}>
+                <div className="absolute top-0 right-0">
+                  <Button
+                    size="sm"
+                    intent="tertiary"
+                    aria-label={t("common.delete")}
+                    onPress={() => onDelete(i)}
+                  >
+                    <XIcon />
+                  </Button>
+                </div>
+                {item}
+              </div>
+            </div>
           ))}
-        </div>
+          <div className="relative">
+            {!disallowMultipleColumns && (
+              <DropzoneBetweenElements
+                className={lastBetweenDropzone()}
+                acceptedDropTypes={acceptedDropTypes}
+                onDrop={dropBetween(items.length)}
+              />
+            )}
+          </div>
+        </>
       )}
-      {showDropzone && (
-        <DropzoneClass
-          acceptedDropTypes={props.acceptedDropTypes}
-          onDrop={props.onDrop}
-          onSelectFile={props.onDropFile!}
-        >
-          {props.dropzoneChildren}
-        </DropzoneClass>
-      )}
+      <div ref={ref}>
+        {showDropzone && onImportLines && (
+          <DropzoneWithFileInput
+            acceptedDropTypes={acceptedDropTypes}
+            onDrop={onDrop}
+            onImportLines={onImportLines}
+          >
+            {dropzoneChildren}
+          </DropzoneWithFileInput>
+        )}
+      </div>
     </div>
   );
 };

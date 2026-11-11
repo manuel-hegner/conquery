@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -14,12 +15,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.zip.GZIPInputStream;
-
-import javax.validation.Validator;
+import jakarta.validation.ValidationException;
+import jakarta.validation.Validator;
 
 import com.bakdata.conquery.ConqueryConstants;
+import com.bakdata.conquery.io.jackson.Jackson;
 import com.bakdata.conquery.models.config.ConqueryConfig;
-import com.bakdata.conquery.models.preproc.Preprocessed;
+import com.bakdata.conquery.models.exceptions.ValidatorHelper;
 import com.bakdata.conquery.models.preproc.PreprocessedHeader;
 import com.bakdata.conquery.models.preproc.PreprocessedReader;
 import com.bakdata.conquery.models.preproc.PreprocessingJob;
@@ -29,8 +31,8 @@ import com.bakdata.conquery.models.preproc.TableInputDescriptor;
 import com.bakdata.conquery.util.io.ConqueryMDC;
 import com.bakdata.conquery.util.io.LogUtil;
 import com.bakdata.conquery.util.io.ProgressBar;
-import com.jakewharton.byteunits.BinaryByteUnit;
-import io.dropwizard.setup.Environment;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.dropwizard.core.setup.Environment;
 import lombok.SneakyThrows;
 import lombok.experimental.FieldNameConstants;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +43,8 @@ import net.sourceforge.argparse4j.impl.type.StringArgumentType;
 import net.sourceforge.argparse4j.inf.ArgumentGroup;
 import net.sourceforge.argparse4j.inf.Namespace;
 import net.sourceforge.argparse4j.inf.Subparser;
+import org.apache.commons.io.FileUtils;
+import org.jetbrains.annotations.NotNull;
 
 @Slf4j
 @FieldNameConstants
@@ -49,7 +53,7 @@ public class PreprocessorCommand extends ConqueryCommand {
 	private final List<String> failed = Collections.synchronizedList(new ArrayList<>());
 	private final List<String> success = Collections.synchronizedList(new ArrayList<>());
 	private ExecutorService pool;
-	private boolean isFailFast = false;
+	private boolean isFailFast;
 	private boolean isStrict = true;
 
 	public PreprocessorCommand() {
@@ -68,13 +72,14 @@ public class PreprocessorCommand extends ConqueryCommand {
 
 			log.info("EXISTS ALREADY");
 
-			int currentHash = preprocessingJob.getDescriptor()
-											  .calculateValidityHash(preprocessingJob.getCsvDirectory(), preprocessingJob.getTag());
+			final int currentHash = preprocessingJob.getDescriptor()
+													.calculateValidityHash(preprocessingJob.getCsvDirectory(), preprocessingJob.getTag());
 
 
-			try (final PreprocessedReader parser = new PreprocessedReader(new GZIPInputStream(new FileInputStream(preprocessingJob.getPreprocessedFile())))) {
+			final ObjectMapper om = Jackson.BINARY_MAPPER.copy();
+			try (final PreprocessedReader parser = new PreprocessedReader(new GZIPInputStream(new FileInputStream(preprocessingJob.getPreprocessedFile())), om)) {
 
-				PreprocessedHeader header = parser.readHeader();
+				final PreprocessedHeader header = parser.readHeader();
 
 				if (header.getValidityHash() == currentHash) {
 					log.info("\tHASH STILL VALID");
@@ -129,12 +134,17 @@ public class PreprocessorCommand extends ConqueryCommand {
 		group.addArgument("--fast-fail")
 			 .action(Arguments.storeTrue())
 			 .setDefault(false)
-			 .help("Stop preprocessing and exit with failure if an error occures that prevents the generation of a cqpp.");
+			 .help("Stop preprocessing and exit with failure if an error occurs that prevents the generation of a cqpp.");
 
 		group.addArgument("--strict")
 			 .type(new BooleanArgumentType())
 			 .setDefault(true)
 			 .help("Escalate missing files to errors.");
+
+		group.addArgument("--buckets")
+			 .type(Integer.class)
+			 .setDefault(100)
+			 .help("Number of buckets to use for id-hashing. This value is required to be a constant per-dataset.");
 
 	}
 
@@ -146,18 +156,83 @@ public class PreprocessorCommand extends ConqueryCommand {
 
 		// Tag if present is appended to input-file csvs, output-file cqpp and used as id of cqpps
 
+		// Seems to be a bug with dropwizard and boolean default-values
 		isFailFast = Optional.ofNullable(namespace.getBoolean("fast-fail")).orElse(false);
-		isStrict = Optional.ofNullable(namespace.getBoolean("strict")).orElse(true);
+		isStrict = Optional.ofNullable(namespace.getBoolean("strict")).orElse(false);
 
-		final List<String> tags = namespace.<String>getList("tag");
+		final List<String> tags = namespace.getList("tag");
 
 		final File inDir = namespace.get("in");
 		final File outDir = namespace.get("out");
-		final List<File> descriptionFiles = namespace.<File>getList("desc");
+		final List<File> descriptionFilesRoot = namespace.getList("desc");
+		final int buckets = namespace.getInt("buckets");
 
 
 		log.info("Preprocessing from command line config.");
 
+		final Collection<PreprocessingJob> jobs = collectJobs(descriptionFilesRoot, tags, inDir, outDir, environment);
+
+		final List<PreprocessingJob> broken = validateJobs(jobs, environment);
+
+		jobs.removeIf(Predicate.not(PreprocessorCommand::requiresProcessing));
+
+		preprocessJobs(jobs, buckets, config);
+
+
+		log.info("Successfully Preprocess {} Jobs:", success.size());
+		success.forEach(desc -> log.info("\tSucceeded Preprocessing for {}", desc));
+
+		if (!broken.isEmpty()) {
+			log.warn("Did not find {} Files", broken.size());
+			broken.forEach(desc -> log.warn("\tDid not find file for {}", desc));
+		}
+
+		if (isFailed()) {
+			log.error("Failed {} Preprocessing Jobs:", failed.size());
+			failed.forEach(desc -> log.error("\tFailed Preprocessing for {}", desc));
+			doFail();
+		}
+	}
+
+	@NotNull
+	private List<PreprocessingJob> validateJobs(Collection<PreprocessingJob> jobs, Environment environment) {
+		final List<PreprocessingJob> broken = new ArrayList<>();
+
+		for (final Iterator<PreprocessingJob> iterator = jobs.iterator(); iterator.hasNext(); ) {
+			final PreprocessingJob job = iterator.next();
+
+			try {
+				ValidatorHelper.failOnError(log, environment.getValidator().validate(job.getDescriptor()));
+			}
+			catch (ValidationException exception) {
+				log.error("Descriptor {} is not valid.", job.getDescriptor(), exception);
+				broken.add(job);
+				iterator.remove();
+				continue;
+			}
+
+			for (TableInputDescriptor input : job.getDescriptor().getInputs()) {
+
+				final File sourceFile = Preprocessor.resolveSourceFile(input.getSourceFile(), job.getCsvDirectory(), job.getTag());
+				if (!sourceFile.exists()) {
+					log.error("Did not find file `{}` for Preprocessing[{}].", sourceFile, job);
+					broken.add(job);
+					iterator.remove();
+				}
+			}
+		}
+
+		// This will halt preprocessing immediately.
+		if (isStrict && !broken.isEmpty()) {
+			log.error("FAILED Preprocessing, files are missing or invalid.");
+			doFail();
+		}
+		return broken;
+	}
+
+	@NotNull
+	private Collection<PreprocessingJob> collectJobs(List<File> descriptionFiles, List<String> tags, File inDir, File outDir, Environment environment)
+			throws IOException {
 		final Collection<PreprocessingJob> jobs = new ArrayList<>();
 
 		if (tags == null || tags.isEmpty()) {
@@ -177,40 +252,23 @@ public class PreprocessorCommand extends ConqueryCommand {
 				}
 			}
 		}
+		return jobs;
+	}
 
-		List<PreprocessingJob> missing = new ArrayList<>();
-
-		for (PreprocessingJob job : jobs) {
-			for (TableInputDescriptor input : job.getDescriptor().getInputs()) {
-				final File sourceFile = Preprocessor.resolveSourceFile(input.getSourceFile(), job.getCsvDirectory(), job.getTag());
-				if (!sourceFile.exists()) {
-					log.error("Did not find file `{}` for Preprocessing[{}].", sourceFile, job);
-					missing.add(job);
-				}
-			}
-		}
-
-		// This will halt preprocessing immediately.
-		if (isStrict && !missing.isEmpty()) {
-			log.error("FAILED Preprocessing, files are missing.");
-			doFail();
-		}
-
-		jobs.removeIf(Predicate.not(PreprocessorCommand::requiresProcessing));
-
+	private void preprocessJobs(Collection<PreprocessingJob> jobs, int buckets, ConqueryConfig config) throws InterruptedException {
 		final long totalSize = jobs.stream()
 								   .mapToLong(PreprocessingJob::estimateTotalCsvSizeBytes)
 								   .sum();
 
-		log.info("Required to preprocess {} in total", BinaryByteUnit.format(totalSize));
+		log.info("Required to preprocess {} in total", FileUtils.byteCountToDisplaySize(totalSize));
 
-		ProgressBar totalProgress = new ProgressBar(totalSize, System.out);
+		final ProgressBar totalProgress = new ProgressBar(totalSize);
 
 		for (PreprocessingJob job : jobs) {
 			pool.submit(() -> {
 				ConqueryMDC.setLocation(job.toString());
 				try {
-					Preprocessor.preprocess(job, totalProgress, config);
+					Preprocessor.preprocess(job, totalProgress, config, buckets);
 					success.add(job.toString());
 				}
 				catch (FileNotFoundException e) {
@@ -228,23 +286,6 @@ public class PreprocessorCommand extends ConqueryCommand {
 		pool.awaitTermination(24, TimeUnit.HOURS);
 
 		ConqueryMDC.clearLocation();
-
-
-		if (!success.isEmpty()) {
-			log.info("Successfully Preprocess {} Jobs:", success.size());
-			success.forEach(desc -> log.info("\tSucceeded Preprocessing for {}", desc));
-		}
-
-		if (!missing.isEmpty()) {
-			log.warn("Did not find {} Files", missing.size());
-			missing.forEach(desc -> log.warn("\tDid not find file for {}", desc));
-		}
-
-		if (isFailed()) {
-			log.error("Failed {} Preprocessing Jobs:", failed.size());
-			failed.forEach(desc -> log.error("\tFailed Preprocessing for {}", desc));
-			doFail();
-		}
 	}
 
 	private void addMissing(PreprocessingJob job) {
@@ -263,7 +304,7 @@ public class PreprocessorCommand extends ConqueryCommand {
 
 	public List<PreprocessingJob> findPreprocessingDescriptions(File descriptionFiles, File inDir, File outputDir, Optional<String> tag, Validator validator)
 			throws IOException {
-		List<PreprocessingJob> out = new ArrayList<>();
+		final List<PreprocessingJob> out = new ArrayList<>();
 
 		final File[] files = descriptionFiles.isFile()
 							 ? new File[]{descriptionFiles}
@@ -284,8 +325,7 @@ public class PreprocessorCommand extends ConqueryCommand {
 		return !failed.isEmpty();
 	}
 
-	private Optional<PreprocessingJob> tryExtractDescriptor(Validator validator, Optional<String> tag, File descriptionFile, File outputDir, File csvDir)
-			throws IOException {
+	private Optional<PreprocessingJob> tryExtractDescriptor(Validator validator, Optional<String> tag, File descriptionFile, File outputDir, File csvDir) {
 		try {
 			final TableImportDescriptor
 					descriptor =

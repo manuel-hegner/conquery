@@ -1,53 +1,86 @@
-import type { ColumnDescription } from "../api/types";
+import type { AsyncRecordBatchStreamReader, RecordBatch } from "apache-arrow";
+import { getType } from "typesafe-actions";
+import type {
+  GetQueryResponseT,
+  PreviewStatisticsResponse,
+} from "../api/types";
+
+import type { Action } from "../app/actions";
 
 import {
-  OPEN_PREVIEW,
-  CLOSE_PREVIEW,
-  LOAD_CSV_START,
-  LOAD_CSV_ERROR,
-} from "./actionTypes";
+  closePreview,
+  loadPreview,
+  openPreview,
+  updateQueryId,
+} from "./actions";
 
 export type PreviewStateT = {
-  csv: string[][] | null;
-  resultColumns: ColumnDescription[] | null;
+  isOpen: boolean;
   isLoading: boolean;
+  dataLoadedForQueryId: string | null;
+  statisticsData: PreviewStatisticsResponse | null;
+  queryData: GetQueryResponseT | null;
+  arrowReader: AsyncRecordBatchStreamReader | null;
+  initialTableData: IteratorResult<RecordBatch> | null;
+  lastQuery: string | null;
 };
 
 const initialState: PreviewStateT = {
-  csv: null,
-  resultColumns: null,
+  isOpen: false,
   isLoading: false,
+  dataLoadedForQueryId: null,
+  statisticsData: null,
+  queryData: null,
+  arrowReader: null,
+  initialTableData: null,
+  lastQuery: null,
 };
 
-export default (
+export default function reducer(
   state: PreviewStateT = initialState,
-  action: any,
-): PreviewStateT => {
+  action: Action,
+): PreviewStateT {
   switch (action.type) {
-    case LOAD_CSV_START:
+    case getType(openPreview):
+      return {
+        ...state,
+        isOpen: true,
+      };
+    case getType(closePreview):
+      return {
+        ...state,
+        isOpen: false,
+      };
+    case getType(loadPreview.request):
       return {
         ...state,
         isLoading: true,
       };
-    case LOAD_CSV_ERROR:
+    case getType(loadPreview.failure):
+      return {
+        ...state,
+        dataLoadedForQueryId: null,
+        statisticsData: null,
+        arrowReader: null,
+        initialTableData: null,
+        isLoading: false,
+      };
+    case getType(loadPreview.success):
       return {
         ...state,
         isLoading: false,
+        dataLoadedForQueryId: action.payload.queryId,
+        queryData: action.payload.queryData,
+        arrowReader: action.payload.arrowReader,
+        initialTableData: action.payload.initialTableData,
+        statisticsData: action.payload.statisticsData,
       };
-    case CLOSE_PREVIEW:
+    case getType(updateQueryId):
       return {
         ...state,
-        csv: null,
-        resultColumns: null,
-      };
-    case OPEN_PREVIEW:
-      return {
-        ...state,
-        csv: action.payload.csv,
-        resultColumns: action.payload.columns,
-        isLoading: false,
+        lastQuery: action.payload.queryId,
       };
     default:
       return state;
   }
-};
+}

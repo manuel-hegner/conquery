@@ -1,9 +1,13 @@
-import { CLICK_PANE_TAB } from "./actionTypes";
+import { getType } from "typesafe-actions";
 
-export type LeftPaneTab = "conceptTrees" | "previousQueries" | "formConfigs";
+import type { Action } from "../app/actions";
+
+import { clickPaneTab } from "./actions";
+
+type LeftPaneTab = "conceptTrees" | "previousQueries" | "formConfigs";
 export interface PanesStateT {
   left: { activeTab: LeftPaneTab };
-  right: { activeTab: string | null };
+  right: { activeTab: string };
 }
 
 const initialState: PanesStateT = {
@@ -11,16 +15,16 @@ const initialState: PanesStateT = {
     activeTab: "conceptTrees",
   },
   right: {
-    activeTab: null,
+    activeTab: "queryEditor",
   },
 };
 
 const reducer = (
   state: PanesStateT = initialState,
-  action: any,
+  action: Action,
 ): PanesStateT => {
   switch (action.type) {
-    case CLICK_PANE_TAB:
+    case getType(clickPaneTab):
       const { paneType, tab } = action.payload;
 
       return {

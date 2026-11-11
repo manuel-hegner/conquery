@@ -1,95 +1,153 @@
 package com.bakdata.conquery.io.result.arrow;
 
 import static com.bakdata.conquery.io.result.ResultUtil.makeResponseWithFileName;
-import static com.bakdata.conquery.io.result.arrow.ArrowRenderer.renderToStream;
-import static com.bakdata.conquery.models.auth.AuthorizationHelper.authorizeDownloadDatasets;
+import static com.bakdata.conquery.resources.ResourceConstants.FILE_EXTENTION_ARROW_FILE;
+import static com.bakdata.conquery.resources.ResourceConstants.FILE_EXTENTION_ARROW_STREAM;
 
 import java.io.OutputStream;
+import java.nio.channels.Channels;
+import java.util.List;
 import java.util.Locale;
+import java.util.OptionalLong;
 import java.util.function.Function;
-
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.StreamingOutput;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 
 import com.bakdata.conquery.io.result.ResultUtil;
-import com.bakdata.conquery.models.auth.entities.User;
-import com.bakdata.conquery.models.auth.permissions.Ability;
+import com.bakdata.conquery.models.auth.entities.Subject;
+import com.bakdata.conquery.models.config.ArrowConfig;
 import com.bakdata.conquery.models.config.ConqueryConfig;
-import com.bakdata.conquery.models.datasets.Dataset;
 import com.bakdata.conquery.models.execution.ManagedExecution;
-import com.bakdata.conquery.models.forms.managed.ManagedForm;
 import com.bakdata.conquery.models.i18n.I18n;
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
+import com.bakdata.conquery.models.identifiable.ids.specific.ManagedExecutionId;
 import com.bakdata.conquery.models.identifiable.mapping.IdPrinter;
-import com.bakdata.conquery.models.query.ManagedQuery;
 import com.bakdata.conquery.models.query.PrintSettings;
 import com.bakdata.conquery.models.query.SingleTableResult;
+import com.bakdata.conquery.models.query.resultinfo.ResultInfo;
+import com.bakdata.conquery.models.query.resultinfo.printers.ArrowResultPrinters;
 import com.bakdata.conquery.models.worker.DatasetRegistry;
 import com.bakdata.conquery.models.worker.Namespace;
 import com.bakdata.conquery.util.io.ConqueryMDC;
-import lombok.experimental.UtilityClass;
+import com.bakdata.conquery.util.io.IdColumnUtil;
+import com.google.common.io.CountingOutputStream;
+import io.dropwizard.util.DataSize;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.dictionary.DictionaryProvider;
+import org.apache.arrow.vector.ipc.ArrowFileWriter;
+import org.apache.arrow.vector.ipc.ArrowStreamWriter;
 import org.apache.arrow.vector.ipc.ArrowWriter;
-import org.apache.http.HttpStatus;
 
-@UtilityClass
 @Slf4j
+@RequiredArgsConstructor(onConstructor_ = {@Inject})
 public class ResultArrowProcessor {
 
+	// From https://www.iana.org/assignments/media-types/application/vnd.apache.arrow.file
+	public static final MediaType FILE_MEDIA_TYPE = new MediaType("application", "vnd.apache.arrow.file");
+	public static final MediaType STREAM_MEDIA_TYPE = new MediaType("application", "vnd.apache.arrow.stream");
 
-	public static <E extends ManagedExecution<?> & SingleTableResult> Response getArrowResult(
+	private final DatasetRegistry<?> datasetRegistry;
+	private final ConqueryConfig conqueryConfig;
+
+	private final ArrowConfig arrowConfig;
+
+
+	public Response createResultFile(Subject subject, ManagedExecutionId exec, boolean pretty, OptionalLong limit) {
+		return getArrowResult(
+				(output) -> (root) -> new ArrowFileWriter(root, new DictionaryProvider.MapDictionaryProvider(), Channels.newChannel(output)),
+				subject,
+				(ManagedExecution & SingleTableResult) exec.resolve(),
+				datasetRegistry,
+				pretty,
+				FILE_EXTENTION_ARROW_FILE,
+				FILE_MEDIA_TYPE,
+				conqueryConfig,
+				arrowConfig,
+				limit
+		);
+	}
+
+	public static <E extends ManagedExecution & SingleTableResult> Response getArrowResult(
 			Function<OutputStream, Function<VectorSchemaRoot, ArrowWriter>> writerProducer,
-			User user,
+			Subject subject,
 			E exec,
-			Dataset dataset,
-			DatasetRegistry datasetRegistry,
+			DatasetRegistry<?> datasetRegistry,
 			boolean pretty,
 			String fileExtension,
 			MediaType mediaType,
-			ConqueryConfig config) {
+			ConqueryConfig config,
+			ArrowConfig arrowConfig,
+			OptionalLong limit
+	) {
 
-		final Namespace namespace = datasetRegistry.get(dataset.getId());
+		ConqueryMDC.setLocation(subject.getName());
 
-		ConqueryMDC.setLocation(user.getName());
-		log.info("Downloading results for {} on dataset {}", exec, dataset);
-		user.authorize(dataset, Ability.READ);
-		user.authorize(dataset, Ability.DOWNLOAD);
+		final DatasetId datasetId = exec.getDataset();
 
+		log.info("Downloading results for {}", datasetId);
 
-		user.authorize(exec, Ability.READ);
-
-		// Check if user is permitted to download on all datasets that were referenced by the query
-		authorizeDownloadDatasets(user, exec);
-
-		if (!(exec instanceof ManagedQuery || (exec instanceof ManagedForm && ((ManagedForm) exec).getSubQueries().size() == 1))) {
-			return Response.status(HttpStatus.SC_UNPROCESSABLE_ENTITY, "Execution result is not a single Table").build();
-		}
+		ResultUtil.authorizeExecutable(subject, exec);
 
 		// Get the locale extracted by the LocaleFilter
 
-
-		IdPrinter idPrinter = config.getFrontend().getQueryUpload().getIdPrinter(user, exec, namespace);
+		final Namespace namespace = datasetRegistry.get(datasetId);
+		IdPrinter idPrinter = IdColumnUtil.getIdPrinter(subject, exec, namespace, config.getIdColumns().getIds());
 		final Locale locale = I18n.LOCALE.get();
-		PrintSettings settings = new PrintSettings(
-				pretty,
-				locale,
-				datasetRegistry,
-				config,
-				idPrinter::createId
-		);
+
+		PrintSettings settings = new PrintSettings(pretty, locale, config, idPrinter::createId, null);
 
 
-		StreamingOutput out = output -> renderToStream(
-				writerProducer.apply(output),
-				settings,
-				config.getArrow().getBatchSize(),
-				config.getFrontend().getQueryUpload().getPrintIdFields(locale),
-				exec.getResultInfo(),
-				exec.streamResults()
-		);
+		// Collect ResultInfos for id columns and result columns
+		final List<ResultInfo> resultInfosId = config.getIdColumns().getIdResultInfos();
+		final List<ResultInfo> resultInfosExec = exec.collectResultInfos();
 
-		return makeResponseWithFileName(out, exec.getLabelWithoutAutoLabelSuffix(), fileExtension, mediaType, ResultUtil.ContentDispositionOption.ATTACHMENT);
+		StreamingOutput out = output -> {
+			CountingOutputStream countingOutputStream = new CountingOutputStream(output);
+			try {
+				ArrowRenderer.renderToStream(
+						writerProducer.apply(countingOutputStream),
+						settings,
+						arrowConfig,
+						resultInfosId,
+						resultInfosExec,
+						exec.streamResults(limit),
+						new ArrowResultPrinters()
+				);
+			}
+			catch (Exception e) {
+				throw new IllegalStateException("Failed streaming the result for execution %s requested by %s after %s".formatted(exec.getId(),
+																																  subject.getId(),
+																																  DataSize.bytes(countingOutputStream.getCount())
+				),
+												e
+				);
+			}
+			finally {
+				log.trace("DONE downloading data for `{}` ({})", exec.getId(), DataSize.bytes(countingOutputStream.getCount()));
+			}
+		};
+
+		return makeResponseWithFileName(Response.ok(out), String.join(".", exec.getLabelWithoutAutoLabelSuffix(), fileExtension), mediaType, ResultUtil.ContentDispositionOption.ATTACHMENT);
 	}
+
+	public Response createResultStream(Subject subject, ManagedExecutionId exec, boolean pretty, OptionalLong limit) {
+		return getArrowResult(
+				(output) -> (root) -> new ArrowStreamWriter(root, new DictionaryProvider.MapDictionaryProvider(), output),
+				subject,
+				((ManagedExecution & SingleTableResult) exec.resolve()),
+				datasetRegistry,
+				pretty,
+				FILE_EXTENTION_ARROW_STREAM,
+				STREAM_MEDIA_TYPE,
+				conqueryConfig,
+				arrowConfig,
+				limit
+		);
+	}
+
 
 }

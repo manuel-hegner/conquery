@@ -34,17 +34,12 @@ public abstract class QPNode extends EventIterating {
 	}
 
 	@Override
-	public abstract void acceptEvent(Bucket bucket, int event);
+	public abstract boolean acceptEvent(Bucket bucket, int event);
 
 	public abstract boolean isContained();
 
 	public List<QPNode> getChildren() {
 		return Collections.emptyList();
-	}
-
-	@Override
-	public String toString() {
-		return getClass().getSimpleName();
 	}
 
 	/**

@@ -2,44 +2,52 @@ package com.bakdata.conquery.models.jobs;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Collection;
-import java.util.SortedSet;
-import java.util.TreeSet;
+import java.util.Collections;
+import java.util.List;
+import jakarta.validation.constraints.NotNull;
+import javax.annotation.Nullable;
 
-import javax.validation.constraints.NotNull;
-
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
+import lombok.EqualsAndHashCode;
+import org.apache.commons.lang3.time.DurationFormatUtils;
 
 
 @Data
-@RequiredArgsConstructor(onConstructor_ = @JsonCreator)
+@AllArgsConstructor(onConstructor_ = @JsonCreator)
+@Builder(toBuilder = true)
 public class JobManagerStatus {
-	@NonNull
+	@Nullable
+	private final String origin;
+	@Nullable
+	private final DatasetId dataset;
 	@NotNull
+	@EqualsAndHashCode.Exclude
+	@Builder.Default
 	private final LocalDateTime timestamp = LocalDateTime.now();
 	@NotNull
-	private final SortedSet<JobStatus> jobs = new TreeSet<>();
+	@EqualsAndHashCode.Exclude
+	@Builder.Default
+	private final List<JobStatus> jobs = Collections.emptyList();
 
-	public JobManagerStatus(Collection<? extends JobStatus> jobs) {
-		this.jobs.addAll(jobs);
-	}
 
 	public int size() {
 		return jobs.size();
 	}
 
+	@JsonIgnore
+	public Duration getAge() {
+		return Duration.between(timestamp, LocalDateTime.now());
+	}
+
 	// Used in AdminUIResource/jobs
 	@JsonIgnore
 	public String getAgeString() {
-		Duration duration = Duration.between(timestamp, LocalDateTime.now());
 
-		if (duration.toSeconds() > 0) {
-			return Long.toString(duration.toSeconds()) + " s";
-		}
-		return Long.toString(duration.toMillis()) + " ms";
+		return DurationFormatUtils.formatDurationWords(getAge().toMillis(), true, true);
 	}
 }

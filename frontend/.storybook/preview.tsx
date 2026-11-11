@@ -1,33 +1,38 @@
-import { ThemeProvider } from "@emotion/react";
-import { addDecorator } from "@storybook/react";
-import React from "react";
+import type { Decorator, Preview } from "@storybook/react";
+import { I18nProvider } from "react-aria-components";
+
+import "../src/index.css";
 
 import { theme } from "../src/app-theme";
-import GlobalStyles from "../src/js/GlobalStyles";
 import DndProvider from "../src/js/app/DndProvider";
+import { AppThemeContext } from "../src/js/app-theme-context";
 import i18next from "../src/js/localization/i18next";
 import translationsDe from "../src/localization/de.json";
 
 i18next.addResourceBundle("de", "translation", translationsDe, true, true);
 i18next.changeLanguage("de");
 
-export const parameters = {
-  actions: { argTypesRegex: "^on[A-Z].*" },
-  controls: {
-    matchers: {
-      color: /(background|color)$/i,
-      date: /Date$/,
+const withProviders: Decorator = (Story) => (
+  <I18nProvider locale="de">
+    <AppThemeContext.Provider value={theme}>
+      <DndProvider>
+        <Story />
+      </DndProvider>
+    </AppThemeContext.Provider>
+  </I18nProvider>
+);
+
+const preview: Preview = {
+  decorators: [withProviders],
+  parameters: {
+    actions: { argTypesRegex: "^on[A-Z].*" },
+    controls: {
+      matchers: {
+        color: /(background|color)$/i,
+        date: /Date$/i,
+      },
     },
   },
 };
 
-addDecorator((Story) => {
-  return (
-    <ThemeProvider theme={theme}>
-      <DndProvider>
-        <GlobalStyles />
-        <Story />
-      </DndProvider>
-    </ThemeProvider>
-  );
-});
+export default preview;

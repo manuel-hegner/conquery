@@ -4,35 +4,56 @@ import java.net.InetAddress;
 import java.nio.charset.Charset;
 import java.time.ZonedDateTime;
 import java.util.Currency;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.Response;
 
 import com.bakdata.conquery.apiv1.FilterTemplate;
 import com.bakdata.conquery.apiv1.IdLabel;
+import com.bakdata.conquery.apiv1.KeyValue;
 import com.bakdata.conquery.apiv1.MetaDataPatch;
+import com.bakdata.conquery.apiv1.execution.ExecutionStatus;
+import com.bakdata.conquery.apiv1.execution.FullExecutionStatus;
+import com.bakdata.conquery.apiv1.execution.OverviewExecutionStatus;
+import com.bakdata.conquery.apiv1.frontend.FrontendRoot;
+import com.bakdata.conquery.apiv1.frontend.FrontendValue;
+import com.bakdata.conquery.apiv1.query.CQElement;
 import com.bakdata.conquery.apiv1.query.QueryDescription;
+import com.bakdata.conquery.apiv1.query.concept.filter.CQTable;
+import com.bakdata.conquery.apiv1.query.concept.filter.FilterValue;
+import com.bakdata.conquery.apiv1.query.concept.filter.ValidityDateContainer;
 import com.bakdata.conquery.io.cps.CPSType;
-import com.bakdata.conquery.io.jackson.serializer.MetaIdRef;
-import com.bakdata.conquery.io.jackson.serializer.MetaIdRefCollection;
-import com.bakdata.conquery.io.jackson.serializer.NsIdRef;
-import com.bakdata.conquery.io.jackson.serializer.NsIdRefCollection;
 import com.bakdata.conquery.model.Base;
 import com.bakdata.conquery.model.Group;
-import com.bakdata.conquery.apiv1.frontend.FERoot;
-import com.bakdata.conquery.apiv1.frontend.FEValue;
+import com.bakdata.conquery.models.common.Range;
+import com.bakdata.conquery.models.config.APIConfig;
+import com.bakdata.conquery.models.config.CSVConfig;
+import com.bakdata.conquery.models.config.ClusterConfig;
+import com.bakdata.conquery.models.config.ConqueryConfig;
+import com.bakdata.conquery.models.config.DatabaseConnectionConfig;
+import com.bakdata.conquery.models.config.Dialect;
+import com.bakdata.conquery.models.config.FrontendConfig;
+import com.bakdata.conquery.models.config.LocaleConfig;
+import com.bakdata.conquery.models.config.MinaConfig;
+import com.bakdata.conquery.models.config.PluginConfig;
+import com.bakdata.conquery.models.config.PreprocessingConfig;
+import com.bakdata.conquery.models.config.QueryConfig;
+import com.bakdata.conquery.models.config.SqlConnectorConfig;
+import com.bakdata.conquery.models.config.StandaloneConfig;
+import com.bakdata.conquery.models.config.XodusConfig;
+import com.bakdata.conquery.models.config.XodusStoreFactory;
 import com.bakdata.conquery.models.config.auth.AuthenticationRealmFactory;
 import com.bakdata.conquery.models.config.auth.AuthorizationConfig;
-import com.bakdata.conquery.apiv1.KeyValue;
-import com.bakdata.conquery.models.common.Range;
+import com.bakdata.conquery.models.datasets.Column;
+import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.datasets.concepts.Concept;
 import com.bakdata.conquery.models.datasets.concepts.Connector;
 import com.bakdata.conquery.models.datasets.concepts.ValidityDate;
@@ -41,39 +62,18 @@ import com.bakdata.conquery.models.datasets.concepts.filters.Filter;
 import com.bakdata.conquery.models.datasets.concepts.select.Select;
 import com.bakdata.conquery.models.datasets.concepts.select.concept.UniversalSelect;
 import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeChild;
-import com.bakdata.conquery.models.config.APIConfig;
-import com.bakdata.conquery.models.config.CSVConfig;
-import com.bakdata.conquery.models.config.ClusterConfig;
-import com.bakdata.conquery.models.config.ConqueryConfig;
-import com.bakdata.conquery.models.config.FrontendConfig;
-import com.bakdata.conquery.models.config.LocaleConfig;
-import com.bakdata.conquery.models.config.MinaConfig;
-import com.bakdata.conquery.models.config.PluginConfig;
-import com.bakdata.conquery.models.config.PreprocessingConfig;
-import com.bakdata.conquery.models.config.QueryConfig;
-import com.bakdata.conquery.models.config.StandaloneConfig;
-import com.bakdata.conquery.models.config.XodusConfig;
-import com.bakdata.conquery.models.config.XodusStoreFactory;
-import com.bakdata.conquery.models.datasets.Column;
-import com.bakdata.conquery.models.datasets.Table;
-import com.bakdata.conquery.apiv1.ExecutionStatus;
-import com.bakdata.conquery.apiv1.FullExecutionStatus;
-import com.bakdata.conquery.apiv1.OverviewExecutionStatus;
 import com.bakdata.conquery.models.forms.configs.FormConfig;
 import com.bakdata.conquery.models.forms.configs.FormConfig.FormConfigFullRepresentation;
 import com.bakdata.conquery.models.forms.configs.FormConfig.FormConfigOverviewRepresentation;
 import com.bakdata.conquery.models.preproc.TableImportDescriptor;
 import com.bakdata.conquery.models.preproc.TableInputDescriptor;
 import com.bakdata.conquery.models.preproc.outputs.OutputDescription;
-import com.bakdata.conquery.apiv1.query.CQElement;
-import com.bakdata.conquery.apiv1.query.concept.filter.CQTable;
-import com.bakdata.conquery.apiv1.query.concept.filter.FilterValue;
-import com.bakdata.conquery.apiv1.query.concept.filter.ValidityDateContainer;
-import com.bakdata.conquery.resources.api.APIResource;
+import com.bakdata.conquery.models.types.SemanticType;
 import com.bakdata.conquery.resources.api.ConceptResource;
 import com.bakdata.conquery.resources.api.ConceptsProcessor;
 import com.bakdata.conquery.resources.api.ConfigResource;
 import com.bakdata.conquery.resources.api.DatasetResource;
+import com.bakdata.conquery.resources.api.DatasetsResource;
 import com.bakdata.conquery.resources.api.FilterResource;
 import com.bakdata.conquery.resources.api.QueryResource;
 import com.bakdata.conquery.resources.api.ResultCsvResource;
@@ -127,8 +127,8 @@ public class Constants {
 				 .otherClass(StandaloneConfig.class)
 				 .otherClass(XodusStoreFactory.class)
 				 .otherClass(MinaConfig.class)
-				 .otherClass(FrontendConfig.CurrencyConfig.class)
 				 .otherClass(XodusConfig.class)
+				 .otherClasses(List.of(SqlConnectorConfig.class, DatabaseConnectionConfig.class, Dialect.class))
 				 .hide(Charset.class)
 				 .hide(Currency.class)
 				 .hide(InetAddress.class)
@@ -138,7 +138,7 @@ public class Constants {
 					.build(),
 			Group.builder().name("REST API JSONs")
 				 .resource(ConfigResource.class)
-				 .resource(APIResource.class)
+				 .resource(DatasetsResource.class)
 				 .resource(DatasetResource.class)
 				 .resource(ConceptResource.class)
 				 .resource(FilterResource.class)
@@ -147,6 +147,7 @@ public class Constants {
 				 .base(new Base(QueryDescription.class, ""))
 				 .base(new Base(CQElement.class, ""))
 				 .base(new Base(FilterValue.class, ""))
+				 .base(new Base(SemanticType.class, ""))
 
 				 .hide(Response.class)
 				 .hide(ZonedDateTime.class)
@@ -156,13 +157,12 @@ public class Constants {
 				 .otherClass(OverviewExecutionStatus.class)
 				 .otherClass(IdLabel.class)
 				 .otherClass(FrontendConfig.class)
-				 .otherClass(FERoot.class)
-				 .otherClass(FEValue.class)
+				 .otherClass(FrontendRoot.class)
+				 .otherClass(FrontendValue.class)
 				 .otherClass(FilterResource.FilterValues.class)
 				 .otherClass(MetaDataPatch.class)
-				 .otherClass(FrontendConfig.CurrencyConfig.class)
 				 .otherClass(ConceptsProcessor.ResolvedFilterResult.class)
-				 .otherClass(FilterResource.StringContainer.class)
+				 .otherClass(FilterResource.AutocompleteRequest.class)
 				 .otherClass(ExecutionStatus.class)
 				 .otherClass(ConceptsProcessor.ResolvedConceptsResult.class)
 				 .otherClass(ConceptResource.ConceptCodeList.class)
@@ -176,8 +176,6 @@ public class Constants {
 
 	public static final String JSON_CREATOR = JsonCreator.class.getName();
 	public static final String CPS_TYPE = CPSType.class.getName();
-	public static final Set<String> ID_REF = Set.of(NsIdRef.class.getName(), MetaIdRef.class.getName());
-	public static final Set<String> ID_REF_COL = Set.of(NsIdRefCollection.class.getName(), MetaIdRefCollection.class.getName());
 	public static final String JSON_IGNORE = JsonIgnore.class.getName();
 	public static final String JSON_BACK_REFERENCE = JsonBackReference.class.getName();
 	public static final String PATH = Path.class.getName();

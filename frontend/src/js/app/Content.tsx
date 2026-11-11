@@ -1,66 +1,61 @@
-import { css } from "@emotion/react";
-import styled from "@emotion/styled";
-import { StateT } from "app-types";
-import React from "react";
 import { useSelector } from "react-redux";
-import SplitPane from "react-split-pane";
-
-import type { TabT } from "../pane/types";
-import ActivateTooltip from "../tooltip/ActivateTooltip";
-import Tooltip from "../tooltip/Tooltip";
-
+import { Group, Panel } from "react-resizable-panels";
+import { ResizeHandle } from "../common/ResizeHandle";
+import { History } from "../entity-history/History";
+import InfoPane from "../info-pane/InfoPane";
+import { useInfoPanePanel } from "../info-pane/useInfoPanePanel";
+import Preview from "../preview/Preview";
 import DndProvider from "./DndProvider";
 import LeftPane from "./LeftPane";
 import RightPane from "./RightPane";
+import type { StateT } from "./reducers";
 
-// ADDING TO react-split-pane STYLES
-// Because otherwise, vertical panes don't expand properly in Safari
-const reactSplitPaneSafariFix = css`
-  .vertical {
-    height: 100%;
-  }
-`;
+const INFO_PANE_MIN = 200;
+const INFO_PANE_MAX = 600;
+const LEFT_PANE_MIN = 350;
+const LEFT_PANE_DEFAULT = 600;
+const RIGHT_PANE_MIN = 250;
+const SEPARATOR_WIDTH = 1;
+const MIN_WIDTH_FOR_INFO_PANE =
+  INFO_PANE_MIN + LEFT_PANE_MIN + RIGHT_PANE_MIN + 2 * SEPARATOR_WIDTH;
 
-const Root = styled("div")`
-  width: 100%;
-  height: 100%;
-  position: relative;
+const Content = () => {
+  const infoPane = useInfoPanePanel({
+    openSize: INFO_PANE_MIN,
+    minGroupWidth: MIN_WIDTH_FOR_INFO_PANE,
+  });
 
-  ${reactSplitPaneSafariFix};
-`;
+  const isPreviewOpen = useSelector<StateT, boolean>(
+    (state) => state.preview.isOpen,
+  );
 
-export interface ContentPropsT {
-  rightTabs: TabT[];
-}
-
-const Content = ({ rightTabs }: ContentPropsT) => {
-  const displayTooltip = useSelector<StateT, boolean>(
-    (state) => state.tooltip.displayTooltip,
+  const isHistoryOpen = useSelector<StateT, boolean>(
+    (state) => state.entityHistory.isOpen,
   );
 
   return (
     <DndProvider>
-      <Root>
-        <SplitPane
-          split="vertical"
-          allowResize={displayTooltip}
-          minSize={displayTooltip ? 200 : 30}
-          maxSize={600}
-          defaultSize={displayTooltip ? "18%" : 30}
-          className={!displayTooltip ? "SplitPane--tooltip-fixed" : ""}
-        >
-          {displayTooltip ? <Tooltip /> : <ActivateTooltip />}
-          <SplitPane
-            split="vertical"
-            minSize={350}
-            maxSize={-300}
-            defaultSize="39%"
+      <div className="relative h-full w-full">
+        <Group orientation="horizontal" {...infoPane.groupProps}>
+          <Panel
+            {...infoPane.panelProps}
+            minSize={INFO_PANE_MIN}
+            maxSize={INFO_PANE_MAX}
           >
+            {infoPane.isOpen && <InfoPane />}
+          </Panel>
+          <ResizeHandle />
+          <Panel minSize={LEFT_PANE_MIN} defaultSize={LEFT_PANE_DEFAULT}>
             <LeftPane />
-            <RightPane tabs={rightTabs} />
-          </SplitPane>
-        </SplitPane>
-      </Root>
+          </Panel>
+          <ResizeHandle />
+          <Panel minSize={RIGHT_PANE_MIN}>
+            <RightPane />
+          </Panel>
+        </Group>
+        {isHistoryOpen && <History />}
+        {isPreviewOpen && <Preview />}
+      </div>
     </DndProvider>
   );
 };

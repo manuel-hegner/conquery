@@ -1,0 +1,122 @@
+import { BanIcon } from "lucide-react";
+import { Fragment } from "react";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+
+import type {
+  ColumnDescriptionSemanticConceptColumn,
+  TimeStratifiedInfo,
+} from "../api/types";
+import { getConceptById } from "../concept-trees/globalTreeStoreHelper";
+import {
+  Tooltip,
+  TooltipTarget,
+  TooltipTrigger,
+} from "../ui-components/Tooltip";
+import { C2 } from "../ui-components/Typography";
+
+import { ConceptBubble } from "./ConceptBubble";
+
+const container = tv({
+  base: [
+    "grid place-items-center",
+    "gap-x-[3px] gap-y-0",
+    "max-w-full",
+    "overflow-x-auto",
+    "p-[10px]",
+  ],
+});
+
+const emptyMsg = tv({
+  base: ["flex items-center", "gap-[10px]", "my-10", "text-gray-600"],
+});
+
+const bubble = tv({
+  base: ["h-[14px] w-[14px]"],
+  variants: {
+    filled: {
+      true: "bg-primary-200",
+      false: "bg-gray-100",
+    },
+  },
+});
+
+export const TimeStratifiedConceptChart = ({
+  timeStratifiedInfo,
+}: {
+  timeStratifiedInfo: TimeStratifiedInfo;
+}) => {
+  const { t } = useTranslation();
+  const conceptColumn = timeStratifiedInfo.columns.at(-1);
+
+  if (!conceptColumn) return null;
+
+  const conceptSemantic = conceptColumn.semantics.find(
+    (s): s is ColumnDescriptionSemanticConceptColumn =>
+      s.type === "CONCEPT_COLUMN",
+  );
+
+  if (!conceptSemantic) return null;
+
+  const descYearInfos = [...timeStratifiedInfo.years].sort(
+    (a, b) => b.year - a.year,
+  );
+
+  const years = descYearInfos.map((y) => y.year);
+  const valuesPerYear = descYearInfos.map((y) =>
+    ((y.values[Object.keys(y.values)[0]] as string[]) || []).map(
+      (conceptId) => getConceptById(conceptId, conceptSemantic?.concept)!,
+    ),
+  );
+
+  const allValues = [
+    ...new Set(
+      valuesPerYear.flat().sort((a, b) => {
+        const nA = Number(a?.label);
+        const nB = Number(b?.label);
+        if (!Number.isNaN(nA) && !Number.isNaN(nB)) return nA - nB;
+        return a?.label.localeCompare(b?.label);
+      }),
+    ),
+  ];
+
+  if (allValues.length === 0)
+    return (
+      <div className={container()}>
+        <div className={emptyMsg()}>
+          <BanIcon />
+          <C2 as="span">{t("history.noData")}</C2>
+        </div>
+      </div>
+    );
+
+  return (
+    <div
+      className={container()}
+      style={{
+        gridTemplateColumns: `repeat(${allValues.length + 1}, 1fr)`,
+      }}
+    >
+      <div />
+      {allValues.map((val) => (
+        <TooltipTrigger key={val.label}>
+          <TooltipTarget as={ConceptBubble} excludeFromTabOrder>
+            {val.label}
+          </TooltipTarget>
+          <Tooltip>{val.description}</Tooltip>
+        </TooltipTrigger>
+      ))}
+      {years.map((year, i) => (
+        <Fragment key={year}>
+          <C2>{year}</C2>
+          {allValues.map((val) => (
+            <div
+              key={val.label}
+              className={bubble({ filled: valuesPerYear[i].includes(val) })}
+            />
+          ))}
+        </Fragment>
+      ))}
+    </div>
+  );
+};

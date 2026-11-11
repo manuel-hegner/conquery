@@ -67,7 +67,7 @@ public class JobExecutor extends Thread {
 		jobs.addAll(this.jobs);
 		return jobs;
 	}
-	
+
 	/**
 	 * Checks if the executor is currently working on a job or if there are jobs left in its queue.
 	 * If so, the executor is busy.
@@ -122,13 +122,15 @@ public class JobExecutor extends Thread {
 					catch (Throwable e) {
 						ConqueryMDC.setLocation(this.getName());
 
-						log.error("Job "+job+" failed", e);
+						log.error("Job {} failed", job, e);
 						if (failOnError) {
 							log.error("Propagating Error inner loop");
 							throw e;
 						}
 					} finally {
 						ConqueryMDC.setLocation(this.getName());
+
+						job.getProgressReporter().done();
 
 						log.trace("Finished job {} within {}", job, timer.stop());
 						time.stop();

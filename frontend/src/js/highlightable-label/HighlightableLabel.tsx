@@ -1,31 +1,25 @@
-import { css } from "@emotion/react";
-import styled from "@emotion/styled";
-import React, { FC } from "react";
+import type { ReactNode } from "react";
+import { tv } from "tailwind-variants";
 
-interface PropsT {
-  className?: string;
-  isHighlighted?: boolean;
-}
+const label = tv({
+  variants: {
+    isHighlighted: {
+      true: ["rounded", "bg-gray-50", "px-[3px] py-0"],
+    },
+  },
+});
 
-const Label = styled("span")<{ isHighlighted?: boolean }>`
-  ${({ theme, isHighlighted }) =>
-    isHighlighted &&
-    css`
-      background-color: ${theme.col.grayVeryLight};
-      border-radius: ${theme.borderRadius};
-      padding: 0 3px;
-    `};
-`;
-
-const HighlightableLabel: FC<PropsT> = ({
+const HighlightableLabel = ({
   isHighlighted,
   className,
   children,
+}: {
+  children: ReactNode;
+  className?: string;
+  isHighlighted?: boolean;
 }) => {
   return (
-    <Label className={className} isHighlighted={isHighlighted}>
-      {children}
-    </Label>
+    <span className={label({ isHighlighted, className })}>{children}</span>
   );
 };
 

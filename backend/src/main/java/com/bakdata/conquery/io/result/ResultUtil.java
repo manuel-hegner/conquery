@@ -1,49 +1,47 @@
 package com.bakdata.conquery.io.result;
 
+import static com.bakdata.conquery.models.auth.AuthorizationHelper.authorizeDownloadDatasets;
+
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.StreamingOutput;
-
+import com.bakdata.conquery.models.auth.entities.Subject;
+import com.bakdata.conquery.models.auth.permissions.Ability;
 import com.bakdata.conquery.models.execution.ManagedExecution;
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import com.bakdata.conquery.models.query.SingleTableResult;
 import com.bakdata.conquery.util.io.FileUtil;
 import com.google.common.base.Strings;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.StreamingOutput;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
-
 @Slf4j
 public class ResultUtil {
 
-	public static enum ContentDispositionOption {
+	private static final Charset WINDOWS_DEFAULT_CHARSET = Charset.forName("windows-1252");
+
+	public enum ContentDispositionOption {
 		// Try to display payload in the browser
 		INLINE,
 		// Force download of the payload by the browser
 		ATTACHMENT;
 
 		String getHeaderValue() {
-			return this.name().toLowerCase(Locale.ROOT);
+			return name().toLowerCase(Locale.ROOT);
 		}
 	}
 
 
-	public static Response makeResponseWithFileName(StreamingOutput out, String label, String fileExtension, MediaType mediaType, ContentDispositionOption disposition) {
-		Response.ResponseBuilder response = Response.ok(out);
+	public static Response makeResponseWithFileName(Response.ResponseBuilder response, String filename, MediaType mediaType, ContentDispositionOption disposition) {
 		response.header(HttpHeaders.CONTENT_TYPE, mediaType);
-		if (!(Strings.isNullOrEmpty(label) || label.isBlank())) {
-			// Set filename from label if the label was set, otherwise the browser will name the file according to the request path
+		if (!(Strings.isNullOrEmpty(filename) || filename.isBlank())) {
+			// Set filename from filename if the filename was set, otherwise the browser will name the file according to the request path
 			response.header("Content-Disposition", String.format(
-					"%s; filename=\"%s\"", disposition.getHeaderValue(), FileUtil.makeSafeFileName(label, fileExtension)));
+					"%s; filename=\"%s\"", disposition.getHeaderValue(), FileUtil.makeSafeFileName(filename)));
 		}
 		return response.build();
 	}
@@ -58,11 +56,11 @@ public class ResultUtil {
 				return Charset.forName(queryCharset);
 			}
 			catch (Exception e) {
-				log.warn("Unable to map '{}' to a charset. Defaulting to UTF-8", queryCharset);
+				log.warn("Unable to map '{}' to a charset.", queryCharset);
 			}
 		}
 		if (userAgent != null && userAgent.toLowerCase().contains("windows")) {
-			return StandardCharsets.ISO_8859_1;
+			return WINDOWS_DEFAULT_CHARSET;
 		}
 		return StandardCharsets.UTF_8;
 	}
@@ -73,10 +71,23 @@ public class ResultUtil {
 	 *
 	 * @param exec the execution to test
 	 */
-	public static void checkSingleTableResult(ManagedExecution<?> exec) {
+	public static void checkSingleTableResult(ManagedExecution exec) {
 		if (!(exec instanceof SingleTableResult)) {
 			throw new BadRequestException("Execution cannot be rendered as the requested format");
 		}
+	}
+
+
+	public static void authorizeExecutable(Subject subject, ManagedExecution exec) {
+		final DatasetId datasetId = exec.getDataset();
+		subject.authorize(datasetId, Ability.READ);
+		subject.authorize(datasetId, Ability.DOWNLOAD);
+
+
+		subject.authorize(exec, Ability.READ);
+
+		// Check if subject is permitted to download on all datasets that were referenced by the query
+		authorizeDownloadDatasets(subject, exec);
 	}
 
 }

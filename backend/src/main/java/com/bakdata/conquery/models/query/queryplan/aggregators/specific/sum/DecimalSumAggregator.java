@@ -4,14 +4,15 @@ import java.math.BigDecimal;
 
 import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.externalservice.ResultType;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.aggregators.SingleColumnAggregator;
+import lombok.ToString;
 
 /**
  * Aggregator implementing a sum over {@code column}, for decimal columns.
  */
+@ToString(callSuper = true, onlyExplicitlyIncluded = true)
 public class DecimalSumAggregator extends SingleColumnAggregator<BigDecimal> {
 
 	private boolean hit = false;
@@ -28,7 +29,7 @@ public class DecimalSumAggregator extends SingleColumnAggregator<BigDecimal> {
 	}
 
 	@Override
-	public void acceptEvent(Bucket bucket, int event) {
+	public void consumeEvent(Bucket bucket, int event) {
 		if (!bucket.has(event, getColumn())) {
 			return;
 		}
@@ -44,9 +45,5 @@ public class DecimalSumAggregator extends SingleColumnAggregator<BigDecimal> {
 	public BigDecimal createAggregationResult() {
 		return hit ? sum : null;
 	}
-	
-	@Override
-	public ResultType getResultType() {
-		return ResultType.NumericT.INSTANCE;
-	}
+
 }

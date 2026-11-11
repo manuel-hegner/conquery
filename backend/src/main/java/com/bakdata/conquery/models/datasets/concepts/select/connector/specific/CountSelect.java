@@ -1,42 +1,81 @@
 package com.bakdata.conquery.models.datasets.concepts.select.connector.specific;
 
-import javax.validation.constraints.NotNull;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import jakarta.validation.constraints.NotNull;
 
 import com.bakdata.conquery.io.cps.CPSType;
-import com.bakdata.conquery.io.jackson.serializer.NsIdRef;
-import com.bakdata.conquery.models.datasets.concepts.select.Select;
 import com.bakdata.conquery.models.datasets.Column;
+import com.bakdata.conquery.models.datasets.concepts.select.Select;
+import com.bakdata.conquery.models.identifiable.ids.specific.ColumnId;
 import com.bakdata.conquery.models.query.queryplan.aggregators.Aggregator;
 import com.bakdata.conquery.models.query.queryplan.aggregators.DistinctValuesWrapperAggregator;
 import com.bakdata.conquery.models.query.queryplan.aggregators.specific.CountAggregator;
-import lombok.Getter;
+import com.bakdata.conquery.models.types.ResultType;
+import com.bakdata.conquery.sql.conversion.model.aggregator.CountSqlAggregator;
+import com.bakdata.conquery.sql.conversion.model.select.SelectConverter;
+import com.bakdata.conquery.sql.execution.ResultSetProcessor;
+import com.bakdata.conquery.util.validation.ResolvableId;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
+import org.jetbrains.annotations.Nullable;
 
 @CPSType(id = "COUNT", base = Select.class)
 @NoArgsConstructor
+@Data
 public class CountSelect extends Select {
 
-	@Getter
-	@Setter
 	private boolean distinct = false;
 
-	@Getter
-	@Setter
-	@NsIdRef
-	private Column distinctByColumn;
-
-	@Getter
-	@Setter
-	@NsIdRef
 	@NotNull
-	private Column column;
+	private List<@ResolvableId ColumnId> distinctByColumn = Collections.emptyList();
+
+
+	@NotNull
+	@ResolvableId
+	private ColumnId column;
 
 	@Override
 	public Aggregator<?> createAggregator() {
-		if (distinct || distinctByColumn != null) {
-			return new DistinctValuesWrapperAggregator<>(new CountAggregator(getColumn()), getDistinctByColumn() == null ? getColumn() : getDistinctByColumn());
+		final Column resolved = getColumn().resolve();
+		if (!isDistinct()) {
+			return new CountAggregator(resolved);
 		}
-		return new CountAggregator(getColumn());
+
+		if (distinctByColumn != null && !getDistinctByColumn().isEmpty()) {
+			return new DistinctValuesWrapperAggregator(new CountAggregator(resolved), getDistinctByColumn().stream().map(ColumnId::resolve).toList());
+		}
+
+		return new DistinctValuesWrapperAggregator(new CountAggregator(resolved), List.of(getColumn().resolve()));
 	}
+
+	@Nullable
+	@Override
+	public List<ColumnId> getRequiredColumns() {
+		final List<ColumnId> out = new ArrayList<>();
+		out.add(getColumn());
+
+		if (distinctByColumn != null) {
+			out.addAll(getDistinctByColumn());
+		}
+
+		return out;
+	}
+
+	@Override
+	public SelectConverter<CountSelect> createConverter() {
+		return new CountSqlAggregator();
+	}
+
+	@Override
+	public ResultSetProcessor.Reader<Integer> createResultSetReader(ResultSetProcessor processor) {
+		return processor::getInteger;
+	}
+
+	@Override
+	public ResultType getResultType() {
+		return ResultType.Primitive.INTEGER;
+	}
+
 }

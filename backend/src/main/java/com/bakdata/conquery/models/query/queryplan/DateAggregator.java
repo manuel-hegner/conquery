@@ -6,11 +6,11 @@ import java.util.Set;
 
 import com.bakdata.conquery.models.common.CDateSet;
 import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.externalservice.ResultType;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
 import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.aggregators.Aggregator;
 import lombok.RequiredArgsConstructor;
+import lombok.ToString;
 
 /**
  * This aggregator builds a tree of other DateAggregator which is partly parallel to the actual query plan.
@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
  * flexibility through different {@link DateAggregationAction}s.
  */
 @RequiredArgsConstructor
+@ToString(of = "action")
 public class DateAggregator extends Aggregator<CDateSet> {
 
     private final DateAggregationAction action;
@@ -46,7 +47,7 @@ public class DateAggregator extends Aggregator<CDateSet> {
 	}
 
 	@Override
-    public void acceptEvent(Bucket bucket, int event) {
+    public void consumeEvent(Bucket bucket, int event) {
         throw new UnsupportedOperationException("This Aggregator uses the result of its siblings and does not accept events");
     }
 
@@ -64,12 +65,8 @@ public class DateAggregator extends Aggregator<CDateSet> {
         return action.aggregate(all);
     }
 
-    @Override
-    public ResultType getResultType() {
-        return new ResultType.ListT(ResultType.DateRangeT.INSTANCE);
-    }
-
 	public boolean hasChildren() {
         return !children.isEmpty();
     }
+
 }

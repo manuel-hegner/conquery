@@ -1,78 +1,96 @@
-import styled from "@emotion/styled";
-import React from "react";
+import { LoaderCircleIcon, PlayIcon, SquareIcon } from "lucide-react";
+import type { Ref } from "react";
+import { Button as RacButton } from "react-aria-components";
 import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
 
-import BasicButton from "../button/BasicButton";
-import FaIcon from "../icon/FaIcon";
+import { textStyle } from "../ui-components/Typography";
 
-type PropsType = {
+const left = tv({
+  base: [
+    "self-stretch",
+    "flex items-center",
+    "px-3",
+    "transition-[color,background-color] duration-100",
+  ],
+  variants: {
+    running: {
+      true: ["bg-white", "border-r border-primary-500"],
+      false: "bg-primary-500 text-white",
+    },
+  },
+});
+
+const runnerLabel = tv({
+  base: [
+    "px-3",
+    "bg-white group-hover/runner:bg-gray-50",
+    textStyle({ size: 2, strong: true, tone: "default" }),
+    "self-stretch",
+    "flex items-center",
+    "whitespace-nowrap",
+    "transition-[background-color] duration-100",
+  ],
+});
+
+// two-tone: the icon part is filled, the label part stays white
+const button = tv({
+  base: [
+    "group/runner",
+    "inline-flex items-center",
+    "h-[30px]",
+    "overflow-hidden",
+    "rounded",
+    "border border-primary-500",
+    "cursor-pointer",
+    "disabled:cursor-not-allowed disabled:opacity-40",
+  ],
+});
+
+const RunnerIcon = ({
+  loading,
+  running,
+}: {
+  loading: boolean;
+  running: boolean;
+}) => {
+  if (loading) return <LoaderCircleIcon />;
+
+  return running ? <SquareIcon className="fill-current" /> : <PlayIcon />;
+};
+
+interface Props {
   isStartStopLoading: boolean;
   isQueryRunning: boolean;
   disabled: boolean;
-  onClick: Function;
-};
-
-const Left = styled("span")`
-  transition: ${({ theme }) =>
-    `color ${theme.transitionTime}, background-color ${theme.transitionTime}`};
-  padding: 0 15px;
-  background-color: ${({ theme, running }) =>
-    running ? "white" : theme.col.blueGrayDark};
-  border-right: ${({ theme, running }) =>
-    running ? `1px solid ${theme.col.blueGrayDark}` : "transparent"};
-`;
-
-const Label = styled("span")`
-  transition: background-color ${({ theme }) => theme.transitionTime};
-  padding: 0 15px;
-  color: ${({ theme }) => theme.col.black};
-  background-color: white;
-  line-height: 2.5;
-  white-space: nowrap;
-`;
-
-const StyledBasicButton = styled(BasicButton)`
-  outline: none;
-  border: 1px solid ${({ theme }) => theme.col.blueGrayDark};
-  border-radius: ${({ theme }) => theme.borderRadius};
-  overflow: hidden;
-  padding: 0;
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.sm};
-  line-height: 2.5;
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  &:hover {
-    ${Label} {
-      background-color: ${({ theme }) => theme.col.grayVeryLight};
-    }
-  }
-`;
-
-function getIcon(loading, running) {
-  return loading ? "spinner" : running ? "stop" : "play";
+  onClick: () => void;
 }
 
 // A button that is prefixed by an icon
 const QueryRunnerButton = ({
+  ref,
   onClick,
   isStartStopLoading,
   isQueryRunning,
   disabled,
-}: PropsType) => {
+}: Props & { ref?: Ref<HTMLDivElement> }) => {
   const { t } = useTranslation();
   const label = isQueryRunning ? t("queryRunner.stop") : t("queryRunner.start");
 
-  const icon = getIcon(isStartStopLoading, isQueryRunning);
-
   return (
-    <StyledBasicButton type="button" onClick={onClick} disabled={disabled}>
-      <Left running={isQueryRunning}>
-        <FaIcon white={!isQueryRunning} icon={icon} />
-      </Left>
-      <Label>{label}</Label>
-    </StyledBasicButton>
+    <div className="flex" ref={ref}>
+      <RacButton
+        className={button()}
+        onPress={onClick}
+        isDisabled={disabled}
+        data-test-id="query-runner-button"
+      >
+        <span className={left({ running: isQueryRunning })}>
+          <RunnerIcon loading={isStartStopLoading} running={isQueryRunning} />
+        </span>
+        <span className={runnerLabel()}>{label}</span>
+      </RacButton>
+    </div>
   );
 };
 

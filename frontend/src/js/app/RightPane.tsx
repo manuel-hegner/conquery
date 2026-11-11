@@ -1,57 +1,59 @@
-import styled from "@emotion/styled";
-import type { StateT } from "app-types";
-import React, { FC, useEffect } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useDispatch, useSelector } from "react-redux";
+import { EditorV2 } from "../editor-v2/EditorV2";
+import { isEditorV2Enabled } from "../environment";
+import { ResetableErrorBoundary } from "../error-fallback/ResetableErrorBoundary";
+import FormsTab from "../external-forms/FormsTab";
+import Pane, { type PaneTab } from "../pane/Pane";
+import StandardQueryEditorTab from "../standard-query-editor/StandardQueryEditorTab";
 
-import Pane from "../pane/Pane";
-import { clickPaneTab } from "../pane/actions";
-import type { TabT } from "../pane/types";
-
-interface PropsT {
-  tabs: TabT[];
-}
-
-const Tab = styled("div")<{ isActive: boolean }>`
-  height: 100%;
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-
-  display: ${({ isActive }) => (isActive ? "flex" : "none")};
-`;
-
-const RightPane: FC<PropsT> = ({ tabs }) => {
+const RightPane = () => {
   const { t } = useTranslation();
-  const dispatch = useDispatch();
-  const activeTab = useSelector<StateT, string | null>(
-    (state) => state.panes.right.activeTab,
+
+  const tabs: PaneTab[] = useMemo(
+    () => [
+      {
+        key: "queryEditor",
+        label: t("rightPane.queryEditor"),
+        tooltip: t("help.tabQueryEditor"),
+        content: <StandardQueryEditorTab />,
+      },
+      ...(isEditorV2Enabled
+        ? [
+            {
+              key: "editorV2",
+              label: t("rightPane.editorV2"),
+              tooltip: t("help.tabEditorV2"),
+              content: (
+                <EditorV2
+                  featureDates
+                  featureNegate
+                  featureExpand
+                  featureConnectorRotate
+                  featureQueryNodeEdit
+                  featureContentInfos
+                  featureTimebasedQueries
+                />
+              ),
+            },
+          ]
+        : []),
+      {
+        key: "externalForms",
+        label: t("rightPane.externalForms"),
+        tooltip: t("help.tabFormEditor"),
+        content: (
+          <ResetableErrorBoundary>
+            <FormsTab />
+          </ResetableErrorBoundary>
+        ),
+      },
+    ],
+    [t],
   );
 
-  useEffect(() => {
-    dispatch(clickPaneTab("right", tabs[0].key));
-  }, [dispatch, tabs]);
-
   return (
-    <Pane
-      right
-      tabs={tabs.map((tab) => ({
-        key: tab.key,
-        label: t(tab.labelKey), // TODO: Somehow make this non-dynamic
-        tooltip: t(tab.tooltipKey), // TODO: Somehow make this non-dynamic
-      }))}
-    >
-      {tabs.map((tab) => {
-        const isActive = tab.key === activeTab;
-        const tabComponent = React.createElement(tab.component);
-
-        return (
-          <Tab key={tab.key} isActive={isActive}>
-            {tabComponent}
-          </Tab>
-        );
-      })}
-    </Pane>
+    <Pane className="bg-bg-100" right tabs={tabs} dataTestId="right-pane" />
   );
 };
 

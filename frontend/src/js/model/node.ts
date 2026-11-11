@@ -1,35 +1,73 @@
-import { ConceptElementT, ConceptT } from "../api/types";
+import { useTranslation } from "react-i18next";
+
+import type { ConceptElementT, ConceptT } from "../api/types";
+import { DNDType } from "../common/constants/dndTypes";
+import { getConceptById } from "../concept-trees/globalTreeStoreHelper";
 import type {
   ConceptQueryNodeType,
+  DragItemConceptTreeNode,
   StandardQueryNodeT,
 } from "../standard-query-editor/types";
+import type { PossibleDroppableObject } from "../ui-components/Dropzone";
 
-import { objectHasSelectedSelects } from "./select";
-import { tablesHaveActiveFilter } from "./table";
+import { objectHasNonDefaultSelects, type SelectConfig } from "./select";
+import {
+  tablesHaveEmptySettings,
+  tablesHaveFilterValues,
+  tablesHaveNonDefaultSettings,
+} from "./table";
+
+export interface NodeResetConfig {
+  useDefaults?: boolean;
+  selectConfig?: SelectConfig;
+}
 
 export const nodeIsConceptQueryNode = (
   node: StandardQueryNodeT,
-): node is ConceptQueryNodeType => !node.isPreviousQuery;
+): node is DragItemConceptTreeNode => node.type === DNDType.CONCEPT_TREE_NODE;
 
-export const nodeHasActiveFilters = (node: StandardQueryNodeT) =>
-  node.excludeTimestamps ||
-  node.excludeFromSecondaryIdQuery ||
-  (nodeIsConceptQueryNode(node) &&
-    (node.includeSubnodes || // TODO REFACTOR / TYPE THIS ONE
-      objectHasSelectedSelects(node) ||
-      nodeHasActiveTableFilters(node) ||
-      nodeHasExludedTable(node)));
-
-export const nodeHasActiveTableFilters = (node: ConceptQueryNodeType) => {
+const nodeHasNonDefaultExludedTable = (node: ConceptQueryNodeType) => {
   if (!node.tables) return false;
 
-  return tablesHaveActiveFilter(node.tables);
+  return node.tables.some(
+    (table) =>
+      (table.exclude && table.default) || (!table.default && !table.exclude),
+  );
 };
 
-export const nodeHasExludedTable = (node: ConceptQueryNodeType) => {
+export const nodeHasEmptySettings = (node: StandardQueryNodeT) => {
+  return (
+    !node.excludeFromSecondaryId &&
+    !node.excludeTimestamps &&
+    (!nodeIsConceptQueryNode(node) ||
+      (tablesHaveEmptySettings(node.tables) &&
+        (!node.selects || node.selects.every((select) => !select.selected))))
+  );
+};
+
+export const nodeHasFilterValues = (node: StandardQueryNodeT) =>
+  nodeIsConceptQueryNode(node) && tablesHaveFilterValues(node.tables);
+
+const nodeHasNonDefaultExcludeTimestamps = (node: StandardQueryNodeT) => {
+  if (!nodeIsConceptQueryNode(node)) return node.excludeTimestamps;
+
+  const root = getConceptById(node.tree, node.tree);
+
+  return node.excludeTimestamps !== root?.excludeFromTimeAggregation;
+};
+
+export const nodeHasNonDefaultSettings = (node: StandardQueryNodeT) =>
+  nodeHasNonDefaultExcludeTimestamps(node) ||
+  node.excludeFromSecondaryId ||
+  (nodeIsConceptQueryNode(node) &&
+    (objectHasNonDefaultSelects(node) ||
+      nodeHasNonDefaultTableSettings(node) ||
+      nodeHasNonDefaultExludedTable(node)));
+
+const nodeHasNonDefaultTableSettings = (node: ConceptQueryNodeType) => {
   if (!node.tables) return false;
 
-  return node.tables.some((table) => table.exclude);
+  return tablesHaveNonDefaultSettings(node.tables);
 };
 
 export function nodeIsInvalid(
@@ -44,7 +82,7 @@ export function nodeIsInvalid(
   );
 }
 
-export function nodeIsBlocklisted(
+function nodeIsBlocklisted(
   node: ConceptQueryNodeType,
   blocklistedConceptIds: string[],
 ) {
@@ -56,7 +94,7 @@ export function nodeIsBlocklisted(
   );
 }
 
-export function nodeIsAllowlisted(
+function nodeIsAllowlisted(
   node: ConceptQueryNodeType,
   allowlistedConceptIds: string[],
 ) {
@@ -71,3 +109,78 @@ export function nodeIsAllowlisted(
 export function nodeIsElement(node: ConceptT): node is ConceptElementT {
   return "tables" in node;
 }
+
+export type NodeIconT =
+  | "leaf"
+  | "folder"
+  | "folderOpen"
+  | "structFolder"
+  | "structFolderOpen"
+  | "pending";
+
+export function getNodeIcon(
+  node: ConceptT,
+  config?: {
+    isStructNode?: boolean;
+    open?: boolean;
+  },
+): NodeIconT {
+  const hasChildren = node.children && node.children?.length > 0;
+
+  if (!hasChildren) {
+    return "leaf";
+  }
+
+  if (config?.open) {
+    return config?.isStructNode ? "structFolderOpen" : "folderOpen";
+  }
+
+  return config?.isStructNode ? "structFolder" : "folder";
+}
+
+const droppableObjectIsConceptTreeNode = (
+  node: PossibleDroppableObject,
+): node is DragItemConceptTreeNode => {
+  return node.type === DNDType.CONCEPT_TREE_NODE;
+};
+
+export const canNodeBeDropped = (
+  node: StandardQueryNodeT,
+  item: PossibleDroppableObject,
+) => {
+  if (
+    !droppableObjectIsConceptTreeNode(item) ||
+    !nodeIsConceptQueryNode(node)
+  ) {
+    return false;
+  }
+  const conceptId = item.ids[0];
+  const itemAlreadyInNode = node.ids.includes(conceptId);
+  const itemHasConceptRoot = item.tree === node.tree;
+  return itemHasConceptRoot && !itemAlreadyInNode;
+};
+
+export const useActiveState = (node?: StandardQueryNodeT) => {
+  const { t } = useTranslation();
+
+  if (!node) {
+    return {
+      active: false,
+      tooltipText: undefined,
+    };
+  }
+
+  const hasNonDefaultSettings = !node.error && nodeHasNonDefaultSettings(node);
+  const hasFilterValues = nodeHasFilterValues(node);
+
+  const tooltipText = hasNonDefaultSettings
+    ? t("queryEditor.hasNonDefaultSettings")
+    : hasFilterValues
+      ? t("queryEditor.hasDefaultSettings")
+      : undefined;
+
+  return {
+    active: hasNonDefaultSettings || hasFilterValues,
+    tooltipText,
+  };
+};

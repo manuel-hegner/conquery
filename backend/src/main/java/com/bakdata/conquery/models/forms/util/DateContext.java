@@ -4,7 +4,6 @@ import java.time.LocalDate;
 import java.time.temporal.IsoFields;
 import java.util.*;
 import java.util.function.Function;
-
 import javax.annotation.Nullable;
 
 import com.bakdata.conquery.apiv1.forms.FeatureGroup;
@@ -45,13 +44,13 @@ public class DateContext {
 	 */
 	@Getter
 	private Integer index = null;
-	
+
 	/**
 	 * The date from which the relative context were generated.
 	 */
 	@Getter @Setter
 	private LocalDate eventDate = null;
-	
+
 	/**
 	 * Indicates under which temporal subdivision mode this instance was created.
 	 */
@@ -64,7 +63,7 @@ public class DateContext {
 	 * The generation of the contexts happens for each resolution with their mapped alignment.
 	 * The returned list is primarily sorted in the order of the given resolutions and secondarily by the temporal
 	 * succession of the contexts, e.g.: with resolutions YEARS, QUARTERS given the list would first contain the
-	 * ascending year ranges and than the quarter ranges. The alignment references always the lower bound of the
+	 * ascending year ranges and then the quarter ranges. The alignment references always the lower bound of the
 	 * dateRangeMask.
 	 * @param dateRangeMask The mask in which the contexts are generated
 	 * @param resolutionAndAlignment The resolutions to produce and their alignment
@@ -79,7 +78,7 @@ public class DateContext {
 			int index = 0;
 			for (CDateRange quarterInMask : divider.apply(dateRangeMask)) {
 				index++;
-				DateContext dc = new DateContext(quarterInMask, FeatureGroup.OUTCOME,
+				DateContext dc = new DateContext(quarterInMask, FeatureGroup.SINGLE_GROUP,
 					// For now there is no index for complete
 					mode.getResolution().equals(Resolution.COMPLETE) ? null : index, null, mode.getResolution());
 				dcList.add(dc);
@@ -96,7 +95,7 @@ public class DateContext {
 		int alignedPerResolution = resolution.getAmountForAlignment(alignment).orElseThrow(() -> new ConqueryError.ExecutionCreationPlanDateContextError(alignment, resolution));
 
 		if (alignedPerResolution == 1) {
-			// When the alignment fits the resolution we can use the the alignment subdivision directly
+			// When the alignment fits the resolution we can use the alignment subdivision directly
 			return (dateRange) -> alignment.getSubdivider().apply(dateRange);
 		}
 
@@ -125,7 +124,7 @@ public class DateContext {
 
 			if (alignedSubdivisionCount % alignedPerResolution != 1) {
 				// The loop did not fullfill the resolution-sized subdivision it begun
-				result.add(alignRef.makeMergedRange(alignedSubdivisions.get(alignedSubdivisions.size() - 1), interestingDate));
+				result.add(alignRef.makeMergedRange(alignedSubdivisions.getLast(), interestingDate));
 			}
 
 			return alignRef.getAlignedIterationDirection(result);
@@ -162,11 +161,11 @@ public class DateContext {
 				List<CDateRange> featureRanges = featureRangeDivider.apply(featureRange);
 				/*
 				 *  Depending on the index placement the event date belong to the feature range , outcome range or neither. This is represented in the index.
-				 *  If the index placement is BEFORE, the event date is included in the most recent feature date range, which is marked by an index of 0.
-				 *  If the index placement is NEUTRAL, the event date is not included in any date range and not range index is marked with 0.
-				 *  If the index placement is AFTER, the event date is included in the earliest outcome date range, which is marked by 0.
+				 *  If the index placement is BEFORE, the event date is included in the most recent feature date range, which is marked by an index of -1.
+				 *  If the index placement is NEUTRAL, the event date is not included in any date range and no range index is marked with 0.
+				 *  If the index placement is AFTER, the event date is included in the earliest outcome date range, which is marked by 1.
 				 */
-				int index = indexPlacement.equals(IndexPlacement.BEFORE) ? featureRanges.size() - 1 : featureRanges.size();
+				int index = featureRanges.size();
 				for (CDateRange subRange : featureRanges) {
 					DateContext dc = new DateContext(
 							subRange,
@@ -183,7 +182,7 @@ public class DateContext {
 
 			if (outcomeRange != null) {
 
-				int index = indexPlacement.equals(IndexPlacement.AFTER) ? 0 : 1;
+				int index = 1;
 				for (CDateRange subRange : outcomeRangeDivider.apply(outcomeRange)) {
 					DateContext dc = new DateContext(
 							subRange,
@@ -203,13 +202,15 @@ public class DateContext {
 
 	/**
 	 * Calculates the feature range.
-	 * 
+	 *
 	 * @param event       The event date to which the range is relative.
 	 * @param indexPlacement  Indicates to which {@link FeatureGroup} the event index
 	 *                    belongs.
 	 * @param featureTime the time units to be included.
 	 * @param timeUnit  The time unit.
 	 * @return The feature range.
+	 *
+	 * TODO Replace this and the following function by a function with an interface like this: private static CDateRange generateRelativeRange(int event, boolean indexIncluded, int relativeAmount, CalendarUnit timeUnit)
 	 */
 	private static CDateRange generateFeatureRange(int event, IndexPlacement indexPlacement, int featureTime, CalendarUnit timeUnit) {
 		if(featureTime <= 0){
@@ -245,7 +246,7 @@ public class DateContext {
 
 	/**
 	 * Calculates the outcome range.
-	 * 
+	 *
 	 * @param event       The event date to which the range is relative.
 	 * @param indexPlacement  Indicates to which {@link FeatureGroup} the event index
 	 *                    belongs.
@@ -290,8 +291,8 @@ public class DateContext {
 
 			default:
 				throw new IllegalArgumentException("Unsupported index placement: " + indexPlacement);
-			
+
 		}
-		
+
 	}
 }

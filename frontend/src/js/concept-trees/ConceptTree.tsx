@@ -1,88 +1,89 @@
-import styled from "@emotion/styled";
-import React, { FC } from "react";
+import { LoaderCircleIcon, RotateCwIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-import type { ConceptT, ConceptIdT } from "../api/types";
-import IconButton from "../button/IconButton";
-import FaIcon from "../icon/FaIcon";
-
+import { tv } from "tailwind-variants";
+import type { ConceptIdT, ConceptT } from "../api/types";
+import { Button } from "../ui-components/Button";
+import { C2 } from "../ui-components/Typography";
 import ConceptTreeNode from "./ConceptTreeNode";
 import ConceptTreeNodeText from "./ConceptTreeNodeText";
 import type { SearchT } from "./reducer";
 
-interface PropsT {
-  id: ConceptIdT;
-  tree: ConceptT | null;
-  treeId: ConceptIdT;
-  label: string;
-  description: string | null;
-  depth: number;
-  loading: boolean;
-  error: string | null;
-  search?: SearchT;
-  onLoadTree: (treeId: ConceptIdT) => void;
-}
+const message = tv({
+  base: ["flex items-center", "my-[2px]"],
+  variants: {
+    error: {
+      true: "text-red",
+    },
+  },
+});
 
-const LoadingTree = styled("p")`
-  font-size: ${({ theme }) => theme.font.sm};
-  margin: 2px 0;
-  line-height: 20px;
-`;
-const ErrorMessage = styled("p")`
-  color: ${({ theme }) => theme.col.red};
-  font-weight: 400;
-  font-size: ${({ theme }) => theme.font.sm};
-  margin: 2px 0;
-  line-height: 20px;
-`;
-
-const ReloadButton = styled(IconButton)`
-  padding: 0 7px 0 12px;
-`;
-
-const Spinner = styled("span")`
-  margin-right: 6px;
-`;
-
-const ConceptTree: FC<PropsT> = ({
-  id,
+const ConceptTree = ({
   depth,
   loading,
   label,
   error,
   tree,
-  treeId,
+  conceptId,
   search,
   onLoadTree,
+}: {
+  tree?: ConceptT;
+  conceptId: ConceptIdT;
+  label: string;
+  depth: number;
+  loading?: boolean;
+  error?: string;
+  search: SearchT;
+  onLoadTree: (conceptId: ConceptIdT) => void;
 }) => {
   const { t } = useTranslation();
 
   if (loading)
     return (
-      <LoadingTree style={{ paddingLeft: 24 + depth * 15 }}>
-        <Spinner>
-          <FaIcon icon="spinner" />
-        </Spinner>
-        <span>{label}</span>
-      </LoadingTree>
+      <div className={message()} style={{ paddingLeft: 24 + depth * 15 }}>
+        <span className="mr-[6px]">
+          <LoaderCircleIcon />
+        </span>
+        <C2 as="span">{label}</C2>
+      </div>
     );
   else if (error)
     return (
-      <ErrorMessage style={{ paddingLeft: 12 + depth * 15 }}>
-        <ReloadButton red icon="redo" onClick={() => onLoadTree(treeId)} />
-        {t("conceptTreeList.error", { tree: label })}
-      </ErrorMessage>
+      <div
+        className={message({ error: true })}
+        style={{ paddingLeft: 12 + depth * 15 }}
+      >
+        <Button
+          intent="tertiary"
+          size="sm"
+          danger
+          aria-label={t("common.retry")}
+          onPress={() => onLoadTree(conceptId)}
+        >
+          <RotateCwIcon />
+        </Button>
+        <C2 as="span">{t("conceptTreeList.error", { tree: label })}</C2>
+      </div>
     );
   else if (tree)
     return (
       <ConceptTreeNode
-        id={id}
-        data={{ ...tree, tree: treeId }}
+        conceptId={conceptId}
+        rootConceptId={conceptId}
+        data={tree}
         depth={depth}
         search={search}
       />
     );
-  else return <ConceptTreeNodeText disabled label={label} depth={depth} />;
+  else
+    return (
+      <ConceptTreeNodeText
+        disabled
+        icon="pending"
+        label={label}
+        depth={depth}
+      />
+    );
 };
 
 export default ConceptTree;

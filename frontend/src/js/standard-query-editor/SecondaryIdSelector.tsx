@@ -1,113 +1,180 @@
-import styled from "@emotion/styled";
-import { StateT } from "app-types";
-import React, { FC, useEffect } from "react";
+import { MicroscopeIcon } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useDispatch, useSelector } from "react-redux";
-
-import { SecondaryId } from "../api/types";
+import { tv } from "tailwind-variants";
+import type { SecondaryId } from "../api/types";
+import type { StateT } from "../app/reducers";
 import { exists } from "../common/helpers/exists";
-import FaIcon from "../icon/FaIcon";
-import ToggleButton from "../ui-components/ToggleButton";
+import { nodeIsConceptQueryNode } from "../model/node";
+import { Label } from "../ui-components/Label";
+import { ToggleButton } from "../ui-components/ToggleButton";
+import { ToggleButtonGroup } from "../ui-components/ToggleButtonGroup";
+import { Tooltip, TooltipTrigger } from "../ui-components/Tooltip";
 
 import { setSelectedSecondaryId } from "./actions";
 import type { StandardQueryStateT } from "./queryReducer";
 import type { SelectedSecondaryIdStateT } from "./selectedSecondaryIdReducer";
 
-const Headline = styled.h3<{ active?: boolean }>`
-  font-size: ${({ theme }) => theme.font.sm};
-  margin: 0;
-  text-transform: uppercase;
-  transition: color ${({ theme }) => theme.transitionTime};
-  color: ${({ theme, active }) =>
-    active ? theme.col.blueGrayDark : theme.col.gray};
-`;
+// the icon shows whether a non-standard id is selected
+const headlineIcon = tv({
+  base: "mr-[10px] transition-[color] duration-100",
+  variants: {
+    active: {
+      true: "text-primary-500",
+      false: "text-gray-600",
+    },
+  },
+});
 
-const SxFaIcon = styled(FaIcon)<{ active?: boolean }>`
-  transition: color ${({ theme }) => theme.transitionTime};
-  color: ${({ theme, active }) =>
-    active ? theme.col.blueGrayDark : theme.col.gray};
-`;
-
-const SecondaryIdSelector: FC = () => {
+const SecondaryIdSelector = () => {
   const { t } = useTranslation();
   const query = useSelector<StateT, StandardQueryStateT>(
     (state) => state.queryEditor.query,
   );
-
   const selectedSecondaryId = useSelector<StateT, SelectedSecondaryIdStateT>(
     (state) => state.queryEditor.selectedSecondaryId,
   );
   const loadedSecondaryIds = useSelector<StateT, SecondaryId[]>(
     (state) => state.conceptTrees.secondaryIds,
   );
-
   const dispatch = useDispatch();
-  const onSetSelectedSecondaryId = (id: string | null) => {
-    dispatch(
-      setSelectedSecondaryId({ secondaryId: id === "standard" ? null : id }),
-    );
-  };
 
-  const availableSecondaryIds = Array.from(
-    new Set(
-      query.flatMap((group) =>
-        group.elements.flatMap((el) => {
-          if (el.isPreviousQuery) {
-            return el.availableSecondaryIds || [];
-          } else {
-            return el.tables
-              .filter((table) => !table.exclude)
-              .flatMap((table) => table.supportedSecondaryIds)
-              .filter(exists);
-          }
-        }),
-      ),
-    ),
-  )
-    .map((id) => loadedSecondaryIds.find((secId) => secId.id === id))
-    .filter(exists);
-
-  useEffect(() => {
-    if (
-      !!selectedSecondaryId &&
-      (availableSecondaryIds.length === 0 ||
-        !availableSecondaryIds.map((id) => id.id).includes(selectedSecondaryId))
-    ) {
-      onSetSelectedSecondaryId(null);
-    }
-  }, [JSON.stringify(availableSecondaryIds)]);
-
-  const options = [
-    {
-      value: "standard",
-      label: t("queryEditor.secondaryIdStandard") as string,
+  const onSetSelectedSecondaryId = useCallback(
+    (id: string | null) => {
+      dispatch(
+        setSelectedSecondaryId({ secondaryId: id === "standard" ? null : id }),
+      );
     },
-    ...availableSecondaryIds.map((id) => ({
-      label: id.label,
-      value: id.id,
-      description: id.description,
-    })),
-  ];
+    [dispatch],
+  );
+
+  // The following is slightly complicated memoization.
+  // The reason: `query` is changing frequently, e.g. with every filter change in every table.
+  // but most of the changes likely won't affect the availableSecondaryIds.
+  // So we only want to trigger rerenders of the selector UI
+  // when the `availableSecondaryId` actually change, i.e. when a secondary id
+  // is added or removed due to a change in the query,
+  // e.g. when certain concepts or queries are added or removed
+  const availableSecondaryIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          query.flatMap((group) =>
+            group.elements.flatMap((el) => {
+              if (nodeIsConceptQueryNode(el)) {
+                return el.tables
+                  .filter((table) => !table.exclude)
+                  .flatMap((table) => table.supportedSecondaryIds)
+                  .filter(exists);
+              } else {
+                return el.availableSecondaryIds || [];
+              }
+            }),
+          ),
+        ),
+      )
+        .map((id) => loadedSecondaryIds.find((secId) => secId.id === id))
+        .filter(exists),
+    [query, loadedSecondaryIds],
+  );
+
+  const availableSecondaryIdsRef = useRef(availableSecondaryIds);
+  availableSecondaryIdsRef.current = availableSecondaryIds;
+
+  const availableSecondaryIdsString = JSON.stringify(availableSecondaryIds);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on the stringified ids, see above
+  useEffect(
+    function unselectSecondaryId() {
+      const activeSecondaryIdNotFound =
+        !!selectedSecondaryId &&
+        (availableSecondaryIdsRef.current.length === 0 ||
+          !availableSecondaryIdsRef.current
+            .map((id) => id.id)
+            .includes(selectedSecondaryId));
+
+      if (activeSecondaryIdNotFound) {
+        onSetSelectedSecondaryId(null);
+      }
+    },
+    [
+      availableSecondaryIdsString,
+      onSetSelectedSecondaryId,
+      selectedSecondaryId,
+    ],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on the stringified ids, see above
+  const options = useMemo(
+    () => [
+      {
+        value: "standard",
+        label: t("queryEditor.secondaryIdStandard") as string,
+      },
+      ...availableSecondaryIdsRef.current.map((id) => ({
+        label: id.label,
+        value: id.id,
+        description: id.description,
+      })),
+    ],
+    // We DO want to recompute this when the availableSecondaryIds change,
+    // see explanation above
+    [availableSecondaryIdsString, t],
+  );
 
   if (options.length < 2) {
     return null;
   }
 
   return (
-    <div>
-      <Headline active={!!selectedSecondaryId}>
-        <SxFaIcon active={!!selectedSecondaryId} left icon="microscope" />
-        {t("queryEditor.secondaryId")}
-      </Headline>
-      <ToggleButton
-        input={{
-          value: selectedSecondaryId || "standard",
-          onChange: onSetSelectedSecondaryId,
-        }}
-        options={options}
-      />
-    </div>
+    <SecondaryIdSelectorUI
+      options={options}
+      value={selectedSecondaryId}
+      onChange={onSetSelectedSecondaryId}
+    />
   );
 };
 
-export default SecondaryIdSelector;
+const SecondaryIdSelectorUI = memo(
+  ({
+    options,
+    value,
+    onChange,
+  }: {
+    options: { label: string; value: string; description?: string }[];
+    value: string | null;
+    onChange: (value: string) => void;
+  }) => {
+    const { t } = useTranslation();
+
+    return (
+      <div>
+        <Label elementType="span" tooltip={t("queryEditor.secondaryIdTooltip")}>
+          <MicroscopeIcon className={headlineIcon({ active: !!value })} />
+          {t("queryEditor.secondaryId")}
+        </Label>
+        <ToggleButtonGroup
+          wrap
+          size="sm"
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[value || "standard"]}
+          onSelectionChange={(keys) => {
+            const [key] = keys;
+            if (typeof key === "string") onChange(key);
+          }}
+        >
+          {options.map(({ value: id, label, description }) => (
+            <TooltipTrigger key={id}>
+              <ToggleButton id={id}>{label}</ToggleButton>
+              <Tooltip>{description}</Tooltip>
+            </TooltipTrigger>
+          ))}
+        </ToggleButtonGroup>
+      </div>
+    );
+  },
+);
+
+export default memo(SecondaryIdSelector);

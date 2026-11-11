@@ -1,20 +1,22 @@
 package com.bakdata.conquery.apiv1.query;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
 
 import com.bakdata.conquery.io.storage.MetaStorage;
-import com.bakdata.conquery.models.auth.entities.User;
-import com.bakdata.conquery.models.datasets.Dataset;
-import com.bakdata.conquery.models.execution.ExecutionState;
-import com.bakdata.conquery.models.execution.ManagedExecution;
+import com.bakdata.conquery.models.config.ConqueryConfig;
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
+import com.bakdata.conquery.models.identifiable.ids.specific.ManagedExecutionId;
+import com.bakdata.conquery.models.identifiable.ids.specific.UserId;
 import com.bakdata.conquery.models.query.ManagedQuery;
 import com.bakdata.conquery.models.query.QueryPlanContext;
 import com.bakdata.conquery.models.query.QueryResolveContext;
 import com.bakdata.conquery.models.query.queryplan.QueryPlan;
-import com.bakdata.conquery.models.query.resultinfo.ResultInfoCollector;
+import com.bakdata.conquery.models.query.resultinfo.ResultInfo;
 import com.bakdata.conquery.models.query.results.EntityResult;
+import com.bakdata.conquery.models.worker.DatasetRegistry;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.EqualsAndHashCode;
 
@@ -22,29 +24,24 @@ import lombok.EqualsAndHashCode;
 public abstract class Query implements QueryDescription {
 
 	public abstract QueryPlan<?> createQueryPlan(QueryPlanContext context);
-	
-	public abstract void collectRequiredQueries(Set<ManagedExecution<?>> requiredQueries);
-	
+
 	@Override
 	public abstract void resolve(QueryResolveContext context);
-	
-	public Set<ManagedExecution<?>> collectRequiredQueries() {
-		Set<ManagedExecution<?>> set = new HashSet<>();
+
+	public Set<ManagedExecutionId> collectRequiredQueries() {
+		Set<ManagedExecutionId> set = new HashSet<>();
 		collectRequiredQueries(set);
 		return set;
 	}
 
-	public ResultInfoCollector collectResultInfos() {
-		ResultInfoCollector collector = new ResultInfoCollector();
-		collectResultInfos(collector);
-		return collector;
-	}
-	
-	public abstract void collectResultInfos(ResultInfoCollector collector);
-	
+	public abstract void collectRequiredQueries(Set<ManagedExecutionId> requiredQueries);
+
+	@JsonIgnore
+	public abstract List<ResultInfo> getResultInfos();
+
 	@Override
-	public ManagedQuery toManagedExecution(User user, Dataset submittedDataset) {
-		return new ManagedQuery(this, user, submittedDataset);
+	public ManagedQuery toManagedExecution(UserId user, DatasetId submittedDataset, MetaStorage storage, DatasetRegistry<?> datasetRegistry, ConqueryConfig config) {
+		return new ManagedQuery(this, user, submittedDataset, storage, datasetRegistry, config);
 	}
 
 	/**
@@ -58,11 +55,12 @@ public abstract class Query implements QueryDescription {
 	/**
 	 * Implement Query-type aware counting of results. Standard method is counting unique entities.
 	 *
-	 * @see ManagedQuery#finish(MetaStorage, ExecutionState) for how it's used.
-	 * @return the number of results in the result List.
 	 * @param results
+	 * @return the number of results in the result List.
 	 */
 	public long countResults(Stream<EntityResult> results) {
-		return results.count();
+		return results.map(EntityResult::listResultLines)
+					  .mapToLong(List::size)
+					  .sum();
 	}
 }

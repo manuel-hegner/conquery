@@ -1,25 +1,72 @@
 package com.bakdata.conquery.io.storage;
 
 import java.io.Closeable;
+import java.io.IOException;
 
-import com.bakdata.conquery.models.config.StoreFactory;
-import com.bakdata.conquery.models.identifiable.CentralRegistry;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableList;
 
 public interface ConqueryStorage extends Closeable {
 
-	CentralRegistry getCentralRegistry();
+	/**
+	 * Initializes the internal stores.
+	 * Injects this storage into the provided object mapper.
+	 *
+	 * @param objectMapper (optional) needed when the {@link com.bakdata.conquery.models.config.StoreFactory} deserializes objects
+	 */
+	void openStores(ObjectMapper objectMapper);
 
-	void openStores(StoreFactory storageFactory);
-	
-	void loadData();
+	default void loadData() {
+		for (ManagedStore store : getStores()) {
+			store.loadData();
+		}
+	}
+
+	/**
+	 * @implSpec The order defines the order of loading. Dependencies should be modeled here.
+	 * @implNote If you implement this method, please do it always from scratch and not using calls to super, it can be quite annoying.
+	 */
+	ImmutableList<ManagedStore> getStores();
 
 	/**
 	 * Delete the storage's contents.
 	 */
-	void clear();
+	default void clear() {
+		for (ManagedStore store : getStores()) {
+			store.clear();
+		}
+	}
 
 	/**
 	 * Remove the storage.
 	 */
-	void removeStorage();
+	default void removeStorage() {
+		for (ManagedStore store : getStores()) {
+			store.removeStore();
+		}
+	}
+
+	/**
+	 * Close the storage.
+	 */
+	default void close() throws IOException {
+		for (ManagedStore store : getStores()) {
+			store.close();
+		}
+	}
+
+	/**
+	 * Invalidates caches.
+	 */
+	default void invalidateCache() {
+		for (ManagedStore store : getStores()) {
+			store.invalidateCache();
+		}
+	}
+
+	default void loadKeys() {
+		for (ManagedStore store : getStores()) {
+			store.loadKeys();
+		}
+	}
 }

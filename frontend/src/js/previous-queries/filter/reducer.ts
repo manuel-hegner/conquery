@@ -1,23 +1,23 @@
 import { getType } from "typesafe-actions";
 
-import { Action } from "../../app/actions";
+import type { Action } from "../../app/actions";
 
-import { setPreviousQueriesFilter } from "./actions";
+import { setFilter } from "./actions";
 
-export type PreviousQueriesFilterStateT = "all" | "own" | "shared" | "system";
+export type ProjectItemsFilterStateT = "all" | "own" | "shared" | "system";
 
-const initialState: PreviousQueriesFilterStateT = "all";
+const initialState: ProjectItemsFilterStateT = "own";
 
-const previousQueriesFilter = (
-  state: PreviousQueriesFilterStateT = initialState,
+const projectItemsFilter = (
+  state: ProjectItemsFilterStateT = initialState,
   action: Action,
-): PreviousQueriesFilterStateT => {
+): ProjectItemsFilterStateT => {
   switch (action.type) {
-    case getType(setPreviousQueriesFilter):
+    case getType(setFilter):
       return action.payload;
     default:
       return state;
   }
 };
 
-export default previousQueriesFilter;
+export default projectItemsFilter;

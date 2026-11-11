@@ -1,0 +1,64 @@
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { useGetQuery } from "../../api/api";
+import type { DragItemQuery } from "../../standard-query-editor/types";
+
+import FormQueryResult from "./FormQueryResult";
+
+interface PropsT {
+  queryResult?: DragItemQuery;
+  placeholder: string;
+  className?: string;
+  onDelete?: () => void;
+  onInvalid: (error: string) => void;
+}
+
+const ValidatedFormQueryResult = ({
+  onInvalid,
+  placeholder,
+  queryResult,
+  ...props
+}: PropsT) => {
+  const getQuery = useGetQuery();
+  const { t } = useTranslation();
+
+  const [localError, setLocalError] = useState<boolean>(false);
+
+  useEffect(
+    function validateQuery() {
+      const loadAndValidateQuery = async () => {
+        if (queryResult) {
+          try {
+            await getQuery(queryResult.id);
+            setLocalError(false);
+          } catch {
+            setLocalError(true);
+            onInvalid(t("previousQuery.loadError"));
+          }
+        }
+      };
+
+      loadAndValidateQuery();
+    },
+    [queryResult, getQuery, t, onInvalid],
+  );
+
+  const error = localError ? t("previousQuery.loadError") : undefined;
+
+  return !queryResult && !error ? (
+    <div className="w-full text-center">{placeholder}</div>
+  ) : (
+    <FormQueryResult
+      {...props}
+      queryResult={queryResult}
+      onDelete={() => {
+        props.onDelete?.();
+        setLocalError(false);
+      }}
+      error={error}
+    />
+  );
+};
+
+export default ValidatedFormQueryResult;

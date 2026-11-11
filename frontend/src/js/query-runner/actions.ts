@@ -1,39 +1,50 @@
-import { TFunction, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { useDispatch } from "react-redux";
+import {
+  type ActionType,
+  createAction,
+  createAsyncAction,
+} from "typesafe-actions";
 
 import {
+  type FormQueryPostPayload,
   useGetQuery,
   usePostFormQueries,
   usePostQueries,
   usePostQueryCancel,
 } from "../api/api";
 import type {
-  DatasetIdT,
+  DatasetT,
   ErrorResponseT,
   GetQueryErrorResponseT,
   GetQueryResponseDoneT,
+  PostQueriesResponseT,
   QueryIdT,
 } from "../api/types";
-import { defaultError, defaultSuccess, ErrorObject } from "../common/actions";
-import { getExternalSupportedErrorMessage } from "../environment";
-import { useLoadQueries } from "../previous-queries/list/actions";
-import { StandardQueryStateT } from "../standard-query-editor/queryReducer";
-import { TimebasedQueryStateT } from "../timebased-query-editor/reducer";
-
 import {
-  START_QUERY_START,
-  START_QUERY_SUCCESS,
-  START_QUERY_ERROR,
-  STOP_QUERY_SUCCESS,
-  STOP_QUERY_ERROR,
-  STOP_QUERY_START,
-  QUERY_RESULT_START,
-  QUERY_RESULT_RESET,
-  QUERY_RESULT_RUNNING,
-  QUERY_RESULT_ERROR,
-  QUERY_RESULT_SUCCESS,
-} from "./actionTypes";
+  type ErrorObject,
+  errorPayload,
+  successPayload,
+} from "../common/actions/genericActions";
+import type { EditorV2Query } from "../editor-v2/types";
+import { updateQueryId } from "../preview/actions";
+import {
+  useLoadFormConfigs,
+  useLoadQueries,
+} from "../previous-queries/list/actions";
+import type { StandardQueryStateT } from "../standard-query-editor/queryReducer";
 import { QUERY_AGAIN_TIMEOUT } from "./constants";
+
+export type QueryRunnerActions = ActionType<
+  | typeof startQuery
+  | typeof stopQuery
+  | typeof queryResultStart
+  | typeof queryResultReset
+  | typeof queryResultRunning
+  | typeof queryResultSuccess
+  | typeof queryResultError
+>;
 
 /*
   This implements a polling mechanism,
@@ -50,16 +61,21 @@ import { QUERY_AGAIN_TIMEOUT } from "./constants";
   by sending a DELETE request for that query ID
 */
 
-export type QueryTypeT = "standard" | "timebased" | "externalForms";
+export type QueryTypeT =
+  | "standard"
+  | "editorV2"
+  | "timebased"
+  | "externalForms";
 
-const startQueryStart = (queryType: QueryTypeT) => ({
-  type: START_QUERY_START,
-  payload: { queryType },
-});
-const startQueryError = (queryType: QueryTypeT, err: ErrorObject) =>
-  defaultError(START_QUERY_ERROR, err, { queryType });
-const startQuerySuccess = (queryType: QueryTypeT, res: any) =>
-  defaultSuccess(START_QUERY_SUCCESS, res, { queryType });
+export const startQuery = createAsyncAction(
+  "query-runners/START_QUERY_START",
+  "query-runners/START_QUERY_SUCCESS",
+  "query-runners/START_QUERY_ERROR",
+)<
+  { queryType: QueryTypeT },
+  { queryType: QueryTypeT; data: PostQueriesResponseT },
+  ErrorObject & { queryType: QueryTypeT }
+>();
 
 export const useStartQuery = (queryType: QueryTypeT) => {
   const dispatch = useDispatch();
@@ -68,79 +84,82 @@ export const useStartQuery = (queryType: QueryTypeT) => {
   const postFormQueries = usePostFormQueries();
 
   return (
-    datasetId: DatasetIdT,
-    query: StandardQueryStateT | TimebasedQueryStateT,
+    datasetId: DatasetT["id"],
+    query: StandardQueryStateT | EditorV2Query | FormQueryPostPayload,
     {
-      formQueryTransformation,
       selectedSecondaryId,
     }: {
-      formQueryTransformation?: Function;
       selectedSecondaryId?: string | null;
     } = {},
   ) => {
-    dispatch(startQueryStart(queryType));
+    dispatch(startQuery.request({ queryType }));
 
-    const apiMethod = formQueryTransformation
-      ? () => postFormQueries(datasetId, query, { formQueryTransformation })
-      : () =>
-          postQueries(datasetId, query, {
-            queryType,
-            selectedSecondaryId,
-          });
+    const apiMethod =
+      queryType === "externalForms"
+        ? () => postFormQueries(datasetId, query as FormQueryPostPayload)
+        : () =>
+            postQueries(
+              datasetId,
+              query as StandardQueryStateT | EditorV2Query,
+              {
+                queryType,
+                selectedSecondaryId,
+              },
+            );
 
     return apiMethod().then(
       (r) => {
-        dispatch(startQuerySuccess(queryType, r));
+        dispatch(startQuery.success(successPayload(r, { queryType })));
 
         const queryId = r.id;
-
+        dispatch(updateQueryId({ queryId }));
         return queryResult(datasetId, queryId);
       },
-      (e) => dispatch(startQueryError(queryType, e)),
+      (e) => dispatch(startQuery.failure(errorPayload(e, { queryType }))),
     );
   };
 };
 
-const stopQueryStart = (queryType: QueryTypeT) => ({
-  type: STOP_QUERY_START,
-  payload: { queryType },
-});
-const stopQueryError = (queryType: QueryTypeT, err: ErrorObject) =>
-  defaultError(STOP_QUERY_ERROR, err, { queryType });
-const stopQuerySuccess = (queryType: QueryTypeT, res: any) =>
-  defaultSuccess(STOP_QUERY_SUCCESS, res, { queryType });
+export const stopQuery = createAsyncAction(
+  "query-runners/STOP_QUERY_START",
+  "query-runners/STOP_QUERY_SUCCESS",
+  "query-runners/STOP_QUERY_ERROR",
+)<
+  { queryType: QueryTypeT },
+  { queryType: QueryTypeT; data: null },
+  ErrorObject & { queryType: QueryTypeT }
+>();
 
 export const useStopQuery = (queryType: QueryTypeT) => {
   const dispatch = useDispatch();
   const cancelQuery = usePostQueryCancel();
 
-  return (datasetId: DatasetIdT, queryId: QueryIdT) => {
-    dispatch(stopQueryStart(queryType));
+  return (queryId: QueryIdT) => {
+    dispatch(stopQuery.request({ queryType }));
 
-    return cancelQuery(datasetId, queryId).then(
-      (r) => dispatch(stopQuerySuccess(queryType, r)),
-      (e) => dispatch(stopQueryError(queryType, e)),
+    return cancelQuery(queryId).then(
+      (r) => dispatch(stopQuery.success(successPayload(r, { queryType }))),
+      (e) => dispatch(stopQuery.failure(errorPayload(e, { queryType }))),
     );
   };
 };
 
-const queryResultStart = (queryType: QueryTypeT) => ({
-  type: QUERY_RESULT_START,
-  payload: { queryType },
-});
-
-export const queryResultReset = (queryType: QueryTypeT) => ({
-  type: QUERY_RESULT_RESET,
-  payload: { queryType },
-});
-
-export const queryResultRunning = (
-  queryType: QueryTypeT,
-  progress?: number,
-) => ({
-  type: QUERY_RESULT_RUNNING,
-  payload: { queryType, progress },
-});
+export const queryResultStart = createAction(
+  "query-runners/QUERY_RESULT_START",
+)<{
+  queryType: QueryTypeT;
+}>();
+export const queryResultReset = createAction(
+  "query-runners/QUERY_RESULT_RESET",
+)<{
+  queryType: QueryTypeT;
+}>();
+export const queryResultRunning = createAction(
+  "query-runners/QUERY_RESULT_RUNNING",
+)<{
+  queryType: QueryTypeT;
+  progress?: number;
+}>();
 
 const getQueryErrorMessage = ({
   t,
@@ -155,13 +174,15 @@ const getQueryErrorMessage = ({
     return t("queryRunner.queryCanceled");
   }
 
-  return (
-    (error &&
-      error.code &&
-      getExternalSupportedErrorMessage(t, error.code, error.context)) ||
-    t("queryRunner.queryFailed")
-  );
+  return error?.message || t("queryRunner.queryFailed");
 };
+
+export const queryResultErrorAction = createAction(
+  "query-runners/QUERY_RESULT_ERROR",
+)<{
+  queryType: QueryTypeT;
+  error?: string;
+}>();
 
 const queryResultError = (
   t: TFunction,
@@ -169,47 +190,60 @@ const queryResultError = (
   e: GetQueryErrorResponseT | Error,
 ) => {
   if (e instanceof Error)
-    return defaultError(QUERY_RESULT_ERROR, e, { queryType });
+    return queryResultErrorAction(errorPayload(e, { queryType }));
 
-  // TODO: Refactor and get rid of defaultError, it's too generic
-  return defaultError(QUERY_RESULT_ERROR, e, {
-    error: getQueryErrorMessage({ t, status: e.status, error: e.error }),
-    queryType,
-  });
+  return queryResultErrorAction(
+    errorPayload(e, {
+      error: getQueryErrorMessage({ t, status: e.status, error: e.error }),
+      queryType,
+    }),
+  );
 };
-const queryResultSuccess = (
-  queryType: QueryTypeT,
-  res: GetQueryResponseDoneT,
-  datasetId: DatasetIdT,
-) => defaultSuccess(QUERY_RESULT_SUCCESS, res, { datasetId, queryType });
+
+export const queryResultSuccess = createAction(
+  "query-runners/QUERY_RESULT_SUCCESS",
+)<{
+  data: GetQueryResponseDoneT;
+  queryType: QueryTypeT;
+  datasetId: DatasetT["id"];
+}>();
 
 const useQueryResult = (queryType: QueryTypeT) => {
   const { t } = useTranslation();
   const dispatch = useDispatch();
   const getQuery = useGetQuery();
-  const loadQueries = useLoadQueries();
+  const { loadQueries } = useLoadQueries();
+  const { loadFormConfigs } = useLoadFormConfigs();
 
-  const queryResult = (datasetId: DatasetIdT, queryId: QueryIdT) => {
-    dispatch(queryResultStart(queryType));
+  const queryResult = (datasetId: DatasetT["id"], queryId: QueryIdT) => {
+    dispatch(queryResultStart({ queryType }));
 
-    return getQuery(datasetId, queryId).then(
+    return getQuery(queryId).then(
       (r) => {
         // Indicate that looking for the result has stopped,
         // but not necessarily succeeded
-        dispatch(queryResultReset(queryType));
+        dispatch(queryResultReset({ queryType }));
 
         switch (r.status) {
           case "DONE":
-            dispatch(queryResultSuccess(queryType, r, datasetId));
+            dispatch(
+              queryResultSuccess(successPayload(r, { queryType, datasetId })),
+            );
 
             // Now there should be a new result that can be queried
             loadQueries(datasetId);
+            loadFormConfigs(datasetId);
             break;
           case "FAILED":
             dispatch(queryResultError(t, queryType, r));
             break;
           case "RUNNING":
-            dispatch(queryResultRunning(queryType, r.progress));
+            dispatch(
+              queryResultRunning({
+                queryType,
+                progress: r.progress || undefined,
+              }),
+            );
             // Try again after a short time:
             //   Use the "long polling" strategy, where we assume that the
             //   backend blocks the request for a couple of seconds and waits
@@ -221,7 +255,6 @@ const useQueryResult = (queryType: QueryTypeT) => {
               QUERY_AGAIN_TIMEOUT,
             );
             break;
-          case "NEW":
           default:
             break;
         }

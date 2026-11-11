@@ -1,7 +1,5 @@
 package com.bakdata.conquery.models.messages.network.specific;
 
-import java.time.Duration;
-
 import com.bakdata.conquery.io.cps.CPSType;
 import com.bakdata.conquery.models.messages.namespaces.specific.RequestConsistency;
 import com.bakdata.conquery.models.messages.network.MessageToManagerNode;
@@ -9,37 +7,30 @@ import com.bakdata.conquery.models.messages.network.NetworkMessage;
 import com.bakdata.conquery.models.messages.network.NetworkMessageContext.ManagerNodeNetworkContext;
 import com.bakdata.conquery.models.worker.ShardNodeInformation;
 import com.bakdata.conquery.models.worker.WorkerInformation;
-import com.bakdata.conquery.util.Wait;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
 
 @CPSType(id="REGISTER_SHARD_WORKER_IDENTITY", base=NetworkMessage.class)
-@AllArgsConstructor @NoArgsConstructor @Getter @Setter
+@Data
+@RequiredArgsConstructor(onConstructor_ = @JsonCreator)
 public class RegisterWorker extends MessageToManagerNode {
 
-	private WorkerInformation info;
-	
+	private final WorkerInformation info;
+
 	@Override
 	public void react(ManagerNodeNetworkContext context) throws Exception {
 		ShardNodeInformation node = getShardNode(context);
-		Wait
-			.builder()
-			.stepTime(Duration.ofMillis(5))
-			.total(Duration.ofSeconds(10))
-			.build()
-			.until(()->getShardNode(context) != null);
-		
+
 		if(node == null) {
-			throw new IllegalStateException("Could not find the slave "+context.getRemoteAddress()+" to register worker "+info.getId());
+			throw new IllegalStateException("Received worker %s from unknown shard %s".formatted(info.getId(), context.getRemoteAddress()));
 		}
 
 		info.setConnectedShardNode(node);
-		context.getNamespaces().register(node, info);
+		context.getClusterState().register(node, info);
 
 		// Request consistency report
-		context.getNamespaces().getWorkers().get(info.getId()).send(new RequestConsistency());
+		context.getClusterState().getWorker(info.getId(), info.getDataset()).send(new RequestConsistency());
 	}
 
 	/**
@@ -48,7 +39,7 @@ public class RegisterWorker extends MessageToManagerNode {
 	 * @return the found slave or null if none was found
 	 */
 	private ShardNodeInformation getShardNode(ManagerNodeNetworkContext context) {
-		return context.getNamespaces()
+		return context.getClusterState()
 			.getShardNodes()
 			.get(context.getRemoteAddress());
 	}

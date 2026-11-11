@@ -1,8 +1,9 @@
 package com.bakdata.conquery.models.preproc.outputs;
 
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 
 import com.bakdata.conquery.io.cps.CPSType;
+import com.bakdata.conquery.models.config.ConqueryConfig;
 import com.bakdata.conquery.models.events.MajorTypeId;
 import com.bakdata.conquery.models.exceptions.ParsingException;
 import com.bakdata.conquery.models.preproc.parser.Parser;
@@ -17,7 +18,7 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 @Data
 @CPSType(id="NULL", base= OutputDescription.class)
 public class NullOutput extends OutputDescription {
-	
+
 	private static final long serialVersionUID = 1L;
 
 	@Override
@@ -37,7 +38,7 @@ public class NullOutput extends OutputDescription {
 	}
 
 	@Override
-	public Output createForHeaders(Object2IntArrayMap<String> headers, DateReader dateReader) {
+	public Output createForHeaders(Object2IntArrayMap<String> headers, DateReader dateReader, ConqueryConfig config) {
 		return new Output() {
 			@Override
 			protected Object parseLine(String[] row, Parser type, long sourceLine) throws ParsingException {
@@ -49,5 +50,10 @@ public class NullOutput extends OutputDescription {
 	@Override
 	public MajorTypeId getResultType() {
 		return inputType;
+	}
+
+	public Parser<?, ?> createParser(ConqueryConfig config) {
+
+		return inputType.createParser(config);
 	}
 }

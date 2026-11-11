@@ -3,44 +3,42 @@ package com.bakdata.conquery.resources.admin.rest;
 import static com.bakdata.conquery.resources.ResourceConstants.CONCEPT;
 import static com.bakdata.conquery.resources.ResourceConstants.DATASET;
 
-import javax.annotation.PostConstruct;
-import javax.inject.Inject;
-import javax.ws.rs.*;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
 
 import com.bakdata.conquery.io.jersey.ExtraMimeTypes;
 import com.bakdata.conquery.models.datasets.concepts.Concept;
-import com.bakdata.conquery.models.datasets.Dataset;
-import com.bakdata.conquery.models.worker.Namespace;
-import com.bakdata.conquery.resources.hierarchies.HAdmin;
+import com.bakdata.conquery.models.identifiable.ids.specific.ConceptId;
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 
 @Produces({ExtraMimeTypes.JSON_STRING, ExtraMimeTypes.SMILE_STRING})
 @Consumes({ExtraMimeTypes.JSON_STRING, ExtraMimeTypes.SMILE_STRING})
 
-@Getter @Setter
+@Getter
+@Setter
 @Path("datasets/{" + DATASET + "}/concepts/{" + CONCEPT + "}")
-public class AdminConceptsResource extends HAdmin {
+@RequiredArgsConstructor(onConstructor_ = {@Inject})
+public class AdminConceptsResource {
 
-	@Inject
-	protected AdminDatasetProcessor processor;
-	
+	private final AdminDatasetProcessor processor;
+
 	@PathParam(DATASET)
-	protected Dataset dataset;
-	protected Namespace namespace;
+	private DatasetId dataset;
 	@PathParam(CONCEPT)
-	protected Concept<?> concept;
+	private ConceptId concept;
 
-	@PostConstruct
-	@Override
-	public void init() {
-		super.init();
-		this.namespace = processor.getDatasetRegistry().get(dataset.getId());
-	}
 
 	@GET
 	public Concept<?> getConcept() {
-		return concept;
+		return concept.resolve();
 	}
 
 	@DELETE

@@ -5,14 +5,14 @@ import c10n.annotations.En;
 
 /**
  * Cosmopolitan (C10n) internationalization provider for elements of a query description.
- * These are used to generate expressive default labels for queries. 
+ * These are used to generate expressive default labels for queries.
  */
 public interface CQElementC10n {
-	
+
 	@En("Uploaded-List")
 	@De("Hochgeladene-Liste")
 	String external();
-	
+
 	@En("Query")
 	@De("Anfrage")
 	String reused();
@@ -28,5 +28,9 @@ public interface CQElementC10n {
 	@En("or")
 	@De("oder")
 	String or();
+
+	@En("exists")
+	@De("existiert")
+	String exists();
 
 }

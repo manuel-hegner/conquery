@@ -1,23 +1,23 @@
+import { getType } from "typesafe-actions";
+
 import type {
   ColumnDescription,
-  DatasetIdT,
+  DatasetT,
   GetQueryResponseDoneT,
+  ResultUrlWithLabel,
 } from "../api/types";
+import type { Action } from "../app/actions";
 
 import {
-  QUERY_RESULT_ERROR,
-  QUERY_RESULT_RESET,
-  QUERY_RESULT_RUNNING,
-  QUERY_RESULT_START,
-  QUERY_RESULT_SUCCESS,
-  START_QUERY_ERROR,
-  START_QUERY_START,
-  START_QUERY_SUCCESS,
-  STOP_QUERY_ERROR,
-  STOP_QUERY_START,
-  STOP_QUERY_SUCCESS,
-} from "./actionTypes";
-import { QueryTypeT } from "./actions";
+  type QueryTypeT,
+  queryResultErrorAction,
+  queryResultReset,
+  queryResultRunning,
+  queryResultStart,
+  queryResultSuccess,
+  startQuery,
+  stopQuery,
+} from "./actions";
 
 interface APICallType {
   loading?: boolean;
@@ -28,10 +28,12 @@ interface APICallType {
 
 interface QueryResultT extends APICallType {
   datasetId?: string;
+  resultLabel?: string;
   resultCount?: number | null;
-  resultUrls?: string[];
+  resultUrls?: ResultUrlWithLabel[];
   resultColumns?: ColumnDescription[] | null;
   queryType?: "CONCEPT_QUERY" | "SECONDARY_ID_QUERY";
+  previewAvailable?: boolean;
 }
 
 export interface QueryRunnerStateT {
@@ -43,6 +45,24 @@ export interface QueryRunnerStateT {
   queryResult: QueryResultT | null;
 }
 
+const getQueryResult = (
+  data: GetQueryResponseDoneT,
+  datasetId: DatasetT["id"],
+) => {
+  return {
+    datasetId,
+    loading: false,
+    success: true,
+    error: null,
+    resultLabel: data.label,
+    resultCount: data.numberOfResults,
+    resultUrls: data.resultUrls,
+    resultColumns: data.columnDescriptions,
+    queryType: data.queryType,
+    previewAvailable: data.previewAvailable,
+  };
+};
+
 export default function createQueryRunnerReducer(type: QueryTypeT) {
   const initialState: QueryRunnerStateT = {
     runningQuery: null,
@@ -52,40 +72,26 @@ export default function createQueryRunnerReducer(type: QueryTypeT) {
     queryResult: null,
   };
 
-  const getQueryResult = (
-    data: GetQueryResponseDoneT,
-    datasetId: DatasetIdT,
-  ) => {
-    return {
-      datasetId,
-      loading: false,
-      success: true,
-      error: null,
-      resultCount: data.numberOfResults,
-      resultUrls: data.resultUrls,
-      resultColumns: data.columnDescriptions,
-      queryType: data.queryType,
-    };
-  };
+  const isForThisQueryType = (action: Action) =>
+    (action as { payload?: { queryType?: QueryTypeT } }).payload?.queryType ===
+    type;
 
   return (
     state: QueryRunnerStateT = initialState,
-    action: Object,
+    action: Action,
   ): QueryRunnerStateT => {
-    if (!action.payload || action.payload.queryType !== type) {
-      return state;
-    }
+    // Every action handled below carries the query type it belongs to
+    if (!isForThisQueryType(action)) return state;
 
     switch (action.type) {
-      // To start a query
-      case START_QUERY_START:
+      case getType(startQuery.request):
         return {
           ...state,
           stopQuery: {},
           startQuery: { loading: true },
           queryResult: null,
         };
-      case START_QUERY_SUCCESS:
+      case getType(startQuery.success):
         return {
           ...state,
           runningQuery: action.payload.data.id,
@@ -93,7 +99,7 @@ export default function createQueryRunnerReducer(type: QueryTypeT) {
           stopQuery: {},
           startQuery: { success: true },
         };
-      case START_QUERY_ERROR:
+      case getType(startQuery.failure):
         return {
           ...state,
           stopQuery: {},
@@ -101,11 +107,10 @@ export default function createQueryRunnerReducer(type: QueryTypeT) {
             error: action.payload.message || action.payload.status,
           },
         };
-
       // To cancel a query
-      case STOP_QUERY_START:
+      case getType(stopQuery.request):
         return { ...state, startQuery: {}, stopQuery: { loading: true } };
-      case STOP_QUERY_SUCCESS:
+      case getType(stopQuery.success):
         return {
           ...state,
           runningQuery: null,
@@ -114,36 +119,34 @@ export default function createQueryRunnerReducer(type: QueryTypeT) {
           startQuery: {},
           stopQuery: { success: true },
         };
-      case STOP_QUERY_ERROR:
+      case getType(stopQuery.failure):
         return {
           ...state,
           startQuery: {},
-          stopQuery: { error: action.payload.message || action.payload.status },
+          stopQuery: {
+            error: action.payload.message || action.payload.status,
+          },
         };
 
       // To check for query results
-      case QUERY_RESULT_START:
+      case getType(queryResultStart):
         return { ...state, queryResult: { loading: true } };
-      case QUERY_RESULT_RUNNING:
+      case getType(queryResultRunning):
         return { ...state, progress: action.payload.progress };
-      case QUERY_RESULT_RESET:
+      case getType(queryResultReset):
         return { ...state, queryResult: { loading: false } };
-      case QUERY_RESULT_SUCCESS:
-        const queryResult = getQueryResult(
-          action.payload.data,
-          action.payload.datasetId,
-        );
-
+      case getType(queryResultSuccess):
         return {
           ...state,
-          queryResult,
+          queryResult: getQueryResult(
+            action.payload.data,
+            action.payload.datasetId,
+          ),
           runningQuery: null,
           progress: undefined,
           queryRunning: false,
         };
-      case QUERY_RESULT_ERROR:
-        const { payload } = action;
-
+      case getType(queryResultErrorAction):
         return {
           ...state,
           runningQuery: null,
@@ -151,7 +154,7 @@ export default function createQueryRunnerReducer(type: QueryTypeT) {
           queryRunning: false,
           queryResult: {
             loading: false,
-            error: payload.error,
+            error: action.payload.error,
           },
         };
       default:

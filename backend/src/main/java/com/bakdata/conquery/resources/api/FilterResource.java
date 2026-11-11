@@ -1,72 +1,86 @@
 package com.bakdata.conquery.resources.api;
 
-import static com.bakdata.conquery.resources.ResourceConstants.*;
+import static com.bakdata.conquery.resources.ResourceConstants.FILTER;
 
 import java.util.List;
-import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
+import jakarta.inject.Inject;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Size;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Response.Status;
 
-import javax.inject.Inject;
-import javax.servlet.http.HttpServletRequest;
-import javax.validation.Valid;
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.WebApplicationException;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.Response.Status;
-
-import com.bakdata.conquery.apiv1.frontend.FEValue;
 import com.bakdata.conquery.io.jersey.ExtraMimeTypes;
-import com.bakdata.conquery.models.datasets.concepts.filters.specific.AbstractSelectFilter;
-import com.bakdata.conquery.resources.api.ConceptsProcessor.ResolvedConceptsResult;
-import com.bakdata.conquery.resources.hierarchies.HFilters;
-import io.dropwizard.logback.shaded.checkerframework.checker.nullness.qual.Nullable;
-import lombok.Data;
+import com.bakdata.conquery.models.auth.permissions.Ability;
+import com.bakdata.conquery.models.datasets.concepts.filters.specific.SelectFilter;
+import com.bakdata.conquery.models.identifiable.ids.specific.FilterId;
+import com.bakdata.conquery.resources.hierarchies.HAuthorized;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import lombok.ToString;
 
 @Setter
 @Produces({ExtraMimeTypes.JSON_STRING, ExtraMimeTypes.SMILE_STRING})
 @Consumes({ExtraMimeTypes.JSON_STRING, ExtraMimeTypes.SMILE_STRING})
-@Path("datasets/{" + DATASET + "}/concepts/{" + CONCEPT + "}/tables/{" + TABLE + "}/filters/{" + FILTER + "}")
-public class FilterResource extends HFilters {
+@Path("filters/{" + FILTER + "}")
+@RequiredArgsConstructor(onConstructor_ = {@Inject})
+@ToString(onlyExplicitlyIncluded = true)
+public class FilterResource extends HAuthorized {
 
-	@Inject
-	protected ConceptsProcessor processor;
+	public static final int MAX_AUTOCOMPLETE_TEXT_LENGTH = 500;
+	public static final int MAX_AUTOCOMPLETE_PAGE_SIZE = 500;
+
+	private final ConceptsProcessor processor;
+
+	@ToString.Include
+	@PathParam(FILTER)
+	protected FilterId filter;
 
 	@POST
 	@Path("resolve")
-	public ResolvedConceptsResult resolveFilterValues(FilterValues filterValues) {
-		return processor.resolveFilterValues((AbstractSelectFilter<?>) filter, filterValues.getValues());
+	public ConceptsProcessor.ResolvedFilterValues resolveFilterValues(FilterValues filterValues) {
+		subject.isPermitted(filter.getDataset(), Ability.READ);
+		subject.isPermitted(filter.getConnector().getConcept(), Ability.READ);
+
+		return processor.resolveFilterValues(filter, filterValues.values());
 	}
 
+	//TODO migrate from filter to searchable
 	@POST
 	@Path("autocomplete")
-	public List<FEValue> autocompleteTextFilter(@Valid StringContainer text, @Context HttpServletRequest req, @QueryParam("page") OptionalInt pageNumberOpt, @QueryParam("pageSize") OptionalInt itemsPerPageOpt) {
+	public ConceptsProcessor.AutoCompleteResult autocompleteTextFilter(@Valid FilterResource.AutocompleteRequest request) {
+		subject.isPermitted(filter.getDataset(), Ability.READ);
+		subject.isPermitted(filter.getConnector().getConcept(), Ability.READ);
 
-		if (!(filter instanceof AbstractSelectFilter)) {
-			throw new WebApplicationException(filter.getId() + " is not a SELECT filter, but " + filter.getClass().getSimpleName() + ".", Status.BAD_REQUEST);
+		if (!(filter.resolve() instanceof SelectFilter)) {
+			throw new WebApplicationException(filter + " is not a SELECT filter, but " + filter.getClass().getSimpleName() + ".", Status.BAD_REQUEST);
 		}
 
 
 		try {
-			return processor.autocompleteTextFilter((AbstractSelectFilter<?>) filter, Objects.requireNonNullElse(text.getText(), ""), pageNumberOpt, itemsPerPageOpt);
-		}catch (IllegalArgumentException e) {
+			return processor.autocompleteTextFilter(filter, request.text().orElse(null), request.page(), request.pageSize());
+		}
+		catch (IllegalArgumentException e) {
 			throw new BadRequestException(e);
 		}
 	}
 
-	@Data
-	public static class FilterValues {
-		private List<String> values;
+	public record FilterValues(List<String> values) {
 	}
 
-	@Data
-	public static class StringContainer {
-		@Nullable
-		private String text;
+	public record AutocompleteRequest(
+			@NonNull Optional<@Size(max = MAX_AUTOCOMPLETE_TEXT_LENGTH) String> text,
+			@NonNull OptionalInt page,
+			@NonNull @Max(MAX_AUTOCOMPLETE_PAGE_SIZE) OptionalInt pageSize
+	) {
 	}
 }

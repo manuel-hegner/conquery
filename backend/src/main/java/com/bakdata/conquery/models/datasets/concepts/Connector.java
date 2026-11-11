@@ -5,29 +5,33 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nullable;
 
-import javax.validation.Valid;
-import javax.validation.constraints.NotNull;
-
+import com.bakdata.conquery.models.datasets.Table;
+import com.bakdata.conquery.models.datasets.concepts.conditions.CTCondition;
 import com.bakdata.conquery.models.datasets.concepts.filters.Filter;
 import com.bakdata.conquery.models.datasets.concepts.select.Select;
-import com.bakdata.conquery.models.datasets.Dataset;
-import com.bakdata.conquery.models.datasets.Import;
-import com.bakdata.conquery.models.datasets.Table;
-import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.events.CBlock;
 import com.bakdata.conquery.models.identifiable.IdMap;
-import com.bakdata.conquery.models.identifiable.Labeled;
-import com.bakdata.conquery.models.identifiable.ids.NamespacedIdentifiable;
+import com.bakdata.conquery.models.identifiable.LabeledNamespaceIdentifiable;
+import com.bakdata.conquery.models.identifiable.ids.specific.ColumnId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConnectorId;
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import com.bakdata.conquery.models.identifiable.ids.specific.FilterId;
+import com.bakdata.conquery.models.identifiable.ids.specific.TableId;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMultiset;
 import com.google.common.collect.Multiset.Entry;
 import io.dropwizard.validation.ValidationMethod;
 import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -39,10 +43,14 @@ import lombok.extern.slf4j.Slf4j;
 @Setter
 @Valid
 @Slf4j
-public abstract class Connector extends Labeled<ConnectorId> implements SelectHolder<Select>, NamespacedIdentifiable<ConnectorId> {
+@JsonIgnoreProperties({"defaultForEntityPreview"})
+public abstract class Connector extends LabeledNamespaceIdentifiable<ConnectorId> implements SelectHolder<Select> {
 
 	public static final int[] NOT_CONTAINED = new int[]{-1};
-	private static final long serialVersionUID = 1L;
+
+	@Nullable
+	@JsonAlias("validityDatesTooltip")
+	private String validityDatesDescription;
 
 	@NotNull
 	@JsonManagedReference
@@ -50,6 +58,7 @@ public abstract class Connector extends Labeled<ConnectorId> implements SelectHo
 	private List<ValidityDate> validityDates = new ArrayList<>();
 
 	@JsonBackReference
+	@EqualsAndHashCode.Exclude
 	private Concept<?> concept;
 
 	@JsonIgnore
@@ -57,22 +66,37 @@ public abstract class Connector extends Labeled<ConnectorId> implements SelectHo
 	@Setter(AccessLevel.NONE)
 	@Valid
 	private transient IdMap<FilterId, Filter<?>> allFiltersMap;
-
-	public Collection<Filter<?>> getFilters() {
-		return allFiltersMap.values();
-	}
-
 	@NotNull
 	@Getter
 	@Setter
 	@JsonManagedReference
 	@Valid
 	private List<Select> selects = new ArrayList<>();
+	/**
+	 * Determines if the connector is preselected for the user when creating a new {@link com.bakdata.conquery.apiv1.query.concept.specific.CQConcept}.
+	 */
+	@JsonProperty("default")
+	private boolean isDefault = true;
 
+	public static boolean isNotContained(int[] mostSpecificChildren) {
+		return Arrays.equals(mostSpecificChildren, NOT_CONTAINED);
+	}
+
+	public Collection<Filter<?>> getFilters() {
+		return allFiltersMap.values();
+	}
+
+	@CheckForNull
+	public abstract ColumnId getColumn();
+
+	@CheckForNull
+	public abstract CTCondition getCondition();
+
+	@JsonIgnore
 	public List<Select> getDefaultSelects() {
 		return getSelects()
-					   .stream().filter(Select::isDefault)
-					   .collect(Collectors.toList());
+				.stream().filter(Select::isDefault)
+				.collect(Collectors.toList());
 	}
 
 	@Override
@@ -85,7 +109,9 @@ public abstract class Connector extends Labeled<ConnectorId> implements SelectHo
 		return new ConnectorId(concept.getId(), getName());
 	}
 
-	public abstract Table getTable();
+	public abstract Table getResolvedTable();
+
+	public abstract TableId resolveTableId();
 
 	@JsonIgnore
 	@ValidationMethod(message = "Filter names are not unique.")
@@ -107,19 +133,42 @@ public abstract class Connector extends Labeled<ConnectorId> implements SelectHo
 	@JsonIgnore
 	public abstract List<Filter<?>> collectAllFilters();
 
-	public synchronized void addImport(Import imp) {
-		for (Filter<?> f : collectAllFilters()) {
-			f.addImport(imp);
-		}
-	}
-
-	public static boolean isNotContained(int[] mostSpecificChildren) {
-		return Arrays.equals(mostSpecificChildren, NOT_CONTAINED);
-	}
-
 	@JsonIgnore
 	@Override
-	public Dataset getDataset() {
+	public DatasetId getDataset() {
 		return getConcept().getDataset();
+	}
+
+	public void init() {
+		getSelects().forEach(Select::init);
+	}
+
+	public Filter<?> getFilterByName(String name) {
+		for (Filter<?> filter : collectAllFilters()) {
+			if (filter.getName().equals(name)) {
+				return filter;
+			}
+		}
+		return null;
+	}
+
+	public Select getSelectByName(String name) {
+		for (Select select : getSelects()) {
+
+			if (select.getName().equals(name)) {
+				return select;
+			}
+		}
+
+		return null;
+	}
+
+	public ValidityDate getValidityDateByName(String name) {
+		for (ValidityDate validityDate : validityDates) {
+			if (validityDate.getName().equals(name)) {
+				return validityDate;
+			}
+		}
+		return null;
 	}
 }

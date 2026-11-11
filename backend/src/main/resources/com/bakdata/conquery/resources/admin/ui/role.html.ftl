@@ -3,10 +3,15 @@
 <#import "templates/permissionCreator.html.ftl" as permissionCreator>
 
 <@layout.layout>
+<div class="container">
 	<div class="row">
 		<div class="col">
-			<h2>Role: ${c.owner.label}</h2>
-			<h3>Id: ${c.owner.id}</h3>
+		<h2>Role ${c.label}</h2>
+		<small class="text-muted">${c.id}</small>
+		</div>
+	</div>
+	<div class="row pt-3">
+		<div class="col">
 
 			<ul class="nav nav-tabs" id="myTab" role="tablist">
 				<li class="nav-item">
@@ -27,18 +32,18 @@
 			<div class="tab-content" id="myTabContent">
 				<div class="tab-pane fade show active" id="ownedPermissions" role="tabpanel"
 					aria-labelledby="ownedPermissions-tab">
-					<@permissionTable.permissionTable ownerId=c.owner.getId() permissions=c.permissions />
+					<@permissionTable.permissionTable ownerId=c.id permissions=c.permissions />
 				</div>
 				<div class="tab-pane fade" id="createPermission" role="tabpanel"
 					aria-labelledby="createPermission-tab">
-					<@permissionCreator.permissionCreator ownerId=c.owner.getId()
+					<@permissionCreator.permissionCreator ownerId=c.id
 						permissionTemplateMap=c.permissionTemplateMap />
 				</div>
 				<div class="tab-pane fade" id="owners" role="tabpanel" aria-labelledby="owners-tab">
 
 					<div class="row">
-						<div class="col">
-							<table class="table table-striped">
+						<div class="col table-responsive">
+							<table class="table table-sm table-striped">
 								<thead>
 									<tr>
 										<th scope="col">User</th>
@@ -48,7 +53,7 @@
 									<#list c.users as user>
 										<tr>
 											<td>
-												<a href="/admin/users/${user.id}">${user.label}</a>
+												<a href="/admin-ui/users/${user.id}">${user.label}</a>
 											</td>
 										</tr>
 									</#list>
@@ -56,8 +61,8 @@
 							</table>
 						</div>
 
-						<div class="col">
-							<table class="table table-striped">
+						<div class="col table-responsive">
+							<table class="table table-sm table-striped">
 								<thead>
 									<tr>
 										<th scope="col">Groups</th>
@@ -67,7 +72,7 @@
 									<#list c.groups as group>
 										<tr>
 											<td>
-												<a href="/admin/groups/${group.id}">${group.label}</a>
+												<a href="/admin-ui/groups/${group.id}">${group.label}</a>
 											</td>
 										</tr>
 									</#list>
@@ -78,4 +83,6 @@
 				</div>
 			</div>
 		</div>
+	</div>
+</div>
 </@layout.layout>

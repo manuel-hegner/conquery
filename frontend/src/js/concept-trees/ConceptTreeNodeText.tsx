@@ -1,180 +1,128 @@
-import { css } from "@emotion/react";
-import styled from "@emotion/styled";
-import * as React from "react";
-import Highlighter from "react-highlight-words";
+import type { Ref } from "react";
+import { tv } from "tailwind-variants";
+import type { NodeIconT } from "../model/node";
+import { Highlighter } from "../ui-components/Highlighter";
+import { C2, textStyle } from "../ui-components/Typography";
+import { NodeIcon } from "./NodeIcon";
 
-import FaIcon from "../icon/FaIcon";
+// Root with transparent background.
+// relative: needed to fix a drag & drop issue in Safari
+// isolate: keeps other layers out of Chrome's drag image of the row
+const root = tv({
+  base: ["relative isolate", "flex", "cursor-pointer", "my-[2px]", "pr-[15px]"],
+});
 
-// Root with transparent background
-const Root = styled("div")`
-  position: relative; // Needed to fix a drag & drop issue in Safari
-  cursor: pointer;
-  padding: 0 15px 0 15px;
-  margin: 2px 0;
-  padding-left: ${({ depth }) => depth * 15 + "px"};
-  display: flex;
-`;
+const text = tv({
+  base: [
+    "inline-flex flex-row flex-nowrap items-center",
+    "select-none",
+    "rounded",
+    "border border-transparent",
+    "h-5 px-[10px]",
+    "text-gray-800",
+    "bg-bg-50",
+  ],
+  variants: {
+    // later wins when several are set
+    disabled: {
+      true: "text-gray-600",
+      false: "hover:border-primary-200",
+    },
+    red: { true: "text-red" },
+    isOpen: { true: "bg-gray-50" },
+  },
+});
 
-const Text = styled("p")`
-  user-select: none;
-  border-radius: ${({ theme }) => theme.borderRadius};
-  margin: 0;
-  padding: 0 10px;
-  line-height: 20px;
-  color: ${({ theme, red, disabled }) =>
-    red ? theme.col.red : disabled ? theme.col.gray : theme.col.black};
-  display: inline-flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: center;
+const nodeIcon = tv({
+  base: "mr-1 text-primary-500",
+  variants: {
+    disabled: { true: "text-gray-400 cursor-not-allowed" },
+  },
+});
 
-  background-color: ${({ theme, isOpen }) =>
-    isOpen ? theme.col.grayVeryLight : "transparent"};
+const descriptionText = tv({
+  base: ["inline-block", "shrink-0", "pl-[3px]"],
+});
 
-  ${({ theme, isOpen, disabled }) =>
-    !disabled &&
-    css`
-      &:hover {
-        background-color: ${theme.col.blueGrayVeryLight};
-        opacity: ${isOpen ? "0.9" : "1"};
-      }
-    `};
-`;
+const resultsNumber = tv({
+  base: [
+    "inline-flex items-center justify-center",
+    "shrink-0",
+    "h-4 px-1",
+    "mr-[5px]",
+    "rounded",
+    textStyle({ size: 3, tone: "primary", strong: true }),
+  ],
+});
 
-const noShrink = css`
-  display: inline-block;
-  flex-shrink: 0;
-`;
+const ConceptTreeNodeText = ({
+  ref,
+  label,
+  description,
+  icon,
+  resultCount,
+  searchWords,
+  className,
+  depth,
 
-const DashIconContainer = styled("span")`
-  flex-shrink: 0;
-  width: 34px;
-  text-align: left;
-  padding-left: 14px;
-  ${noShrink};
-`;
+  isOpen,
+  red,
+  disabled,
 
-const FolderIconContainer = styled("span")`
-  width: 20px;
-  ${noShrink};
-`;
+  onClick,
+}: {
+  ref?: Ref<HTMLDivElement>;
 
-const CaretIconContainer = styled("span")`
-  width: 14px;
-  ${noShrink};
-`;
-
-const Description = styled("span")`
-  padding-left: 3px;
-  ${noShrink};
-`;
-
-const ResultsNumber = styled("span")`
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  padding: 2px 4px;
-  margin-right: 5px;
-  font-size: ${({ theme }) => theme.font.xs};
-  border-radius: ${({ theme }) => theme.borderRadius};
-  color: ${({ theme }) => theme.col.blueGrayDark};
-  font-weight: 700;
-`;
-
-interface PropsT {
   label: string;
   depth: number;
+  icon: NodeIconT;
+
   className?: string;
   description?: string;
   resultCount?: number | null;
   searchWords?: string[] | null;
   isOpen?: boolean;
-  isStructFolder?: boolean;
-  hasChildren?: boolean;
   red?: boolean;
   disabled?: boolean;
   onClick?: () => void;
-}
-
-export default React.forwardRef<HTMLDivElement, PropsT>(
-  (
-    {
-      label,
-      description,
-      resultCount,
-      searchWords,
-      className,
-      depth,
-
-      isOpen,
-      isStructFolder,
-      red,
-      disabled,
-      hasChildren,
-
-      onClick,
-    },
-    ref,
-  ) => (
-    <Root ref={ref} className={className} depth={depth}>
-      <Text onClick={onClick} isOpen={isOpen} red={red} disabled={disabled}>
-        {hasChildren && (
-          <>
-            <CaretIconContainer>
-              <FaIcon
-                disabled={disabled}
-                active
-                icon={!!isOpen ? "caret-down" : "caret-right"}
-              />
-            </CaretIconContainer>
-            <FolderIconContainer>
-              <FaIcon
-                active
-                disabled={disabled}
-                regular={!!isStructFolder}
-                icon={!!isOpen ? "folder-open" : "folder"}
-              />
-            </FolderIconContainer>
-          </>
-        )}
-        {!hasChildren && (
-          <DashIconContainer>
-            <FaIcon
-              disabled={disabled}
-              large
-              active
-              icon={disabled ? "ellipsis-h" : "minus"}
-            />
-          </DashIconContainer>
-        )}
-        {resultCount && <ResultsNumber>{resultCount}</ResultsNumber>}
-        <span>
-          {!!searchWords ? (
-            <Highlighter
-              searchWords={searchWords}
-              autoEscape={true}
-              textToHighlight={label}
-            />
+}) => {
+  return (
+    <div
+      ref={ref}
+      className={root({ className })}
+      style={{ paddingLeft: depth * 15 }}
+    >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: TODO make this a button */}
+      <p
+        className={text({ disabled: !!disabled, red, isOpen })}
+        onClick={onClick}
+      >
+        <NodeIcon icon={icon} className={nodeIcon({ disabled: !!disabled })} />
+        {resultCount && <span className={resultsNumber()}>{resultCount}</span>}
+        <C2 as="span">
+          {searchWords ? (
+            <Highlighter searchWords={searchWords} textToHighlight={label} />
           ) : (
             label
           )}
-        </span>
+        </C2>
         {!!description && (
-          <Description>
-            {!!searchWords ? (
-              <Highlighter
-                searchWords={searchWords}
-                autoEscape={true}
-                textToHighlight={description}
-              />
-            ) : (
-              `- ${description}`
-            )}
-          </Description>
+          <span className={descriptionText()}>
+            <C2 as="span">
+              {searchWords ? (
+                <Highlighter
+                  searchWords={searchWords}
+                  textToHighlight={description}
+                />
+              ) : (
+                `- ${description}`
+              )}
+            </C2>
+          </span>
         )}
-      </Text>
-    </Root>
-  ),
-);
+      </p>
+    </div>
+  );
+};
+
+export default ConceptTreeNodeText;

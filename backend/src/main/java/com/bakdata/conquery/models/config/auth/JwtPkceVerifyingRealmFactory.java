@@ -1,27 +1,72 @@
 package com.bakdata.conquery.models.config.auth;
 
-import com.bakdata.conquery.apiv1.RequestAwareUriBuilder;
+import java.io.IOException;
+import java.net.URI;
+import java.security.PublicKey;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.core.Cookie;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.NewCookie;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
+
 import com.bakdata.conquery.apiv1.RequestHelper;
-import com.bakdata.conquery.commands.ManagerNode;
 import com.bakdata.conquery.io.cps.CPSType;
 import com.bakdata.conquery.io.jackson.Jackson;
+import com.bakdata.conquery.models.auth.AuthorizationController;
 import com.bakdata.conquery.models.auth.ConqueryAuthenticationRealm;
 import com.bakdata.conquery.models.auth.oidc.JwtPkceVerifyingRealm;
 import com.bakdata.conquery.models.auth.web.RedirectingAuthFilter;
+import com.bakdata.conquery.models.config.ConqueryConfig;
 import com.bakdata.conquery.resources.admin.AdminServlet;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.nimbusds.jwt.JWTParser;
-import com.nimbusds.oauth2.sdk.*;
+import com.nimbusds.oauth2.sdk.AccessTokenResponse;
+import com.nimbusds.oauth2.sdk.AuthorizationCode;
+import com.nimbusds.oauth2.sdk.AuthorizationCodeGrant;
+import com.nimbusds.oauth2.sdk.AuthorizationGrant;
+import com.nimbusds.oauth2.sdk.ParseException;
+import com.nimbusds.oauth2.sdk.RefreshTokenGrant;
+import com.nimbusds.oauth2.sdk.TokenRequest;
+import com.nimbusds.oauth2.sdk.TokenResponse;
+import com.nimbusds.oauth2.sdk.http.HTTPRequest;
 import com.nimbusds.oauth2.sdk.http.HTTPResponse;
 import com.nimbusds.oauth2.sdk.id.ClientID;
 import com.nimbusds.oauth2.sdk.token.RefreshToken;
 import groovy.lang.Binding;
 import groovy.lang.GroovyShell;
 import groovy.lang.Script;
+import io.dropwizard.client.JerseyClientBuilder;
+import io.dropwizard.core.setup.Environment;
+import io.dropwizard.jersey.DropwizardResourceConfig;
 import io.dropwizard.validation.ValidationMethod;
-import lombok.*;
+import lombok.AccessLevel;
+import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.codehaus.groovy.control.CompilerConfiguration;
 import org.codehaus.groovy.control.customizers.ImportCustomizer;
@@ -32,24 +77,9 @@ import org.keycloak.jose.jwk.JWK;
 import org.keycloak.jose.jwk.JWKParser;
 import org.keycloak.representations.AccessToken;
 
-import javax.validation.constraints.Min;
-import javax.validation.constraints.NotEmpty;
-import javax.validation.constraints.NotNull;
-import javax.ws.rs.client.Client;
-import javax.ws.rs.container.ContainerRequestContext;
-import javax.ws.rs.core.*;
-import javax.ws.rs.core.Response;
-
-import java.io.IOException;
-import java.net.URI;
-import java.security.PublicKey;
-import java.util.*;
-import java.util.function.BiFunction;
-import java.util.function.Supplier;
-
 /**
  * A realm that verifies oauth tokens using PKCE.
- *
+ * <p>
  * Since the adminEnd-UI mainly works with direct links that do not support setting of the Authorization-header to transport an access token
  * and it also does not support the oauth code flow, this realm proxies the flow.
  * 1. The user/client is redirected to the IDP for authentication and redirected back to the adminEnd
@@ -84,7 +114,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 	/**
 	 * See wellKnownEndpoint.
 	 */
-	private IdpConfiguration idpConfiguration;
+	private volatile IdpConfiguration idpConfiguration;
 
 	/**
 	 * A leeway for token's expiration in seconds, this should be a short time.
@@ -105,6 +135,13 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 	@JsonIgnore
 	private Supplier<Optional<IdpConfiguration>> idpConfigurationSupplier;
 
+	@JsonIgnore
+	@Getter(AccessLevel.NONE)
+	private final Cache<String, PendingAuthorizationRequest> pendingAuthorizationRequests = Caffeine.newBuilder()
+																						.maximumSize(10_000)
+																						.expireAfterWrite(10, TimeUnit.MINUTES)
+																						.build();
+
 	/**
 	 * Authentication cookie creator for using the Admin API
 	 */
@@ -118,44 +155,51 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		return wellKnownEndpoint != null || idpConfiguration != null;
 	}
 
-	@AllArgsConstructor
-	@Getter
-	public static class IdpConfiguration {
-
-		/**
-		 * The public key information that is used to validate signed JWT.
-		 * It can be retrieved from the IDP.
-		 */
-		@NonNull
-		private final PublicKey publicKey;
-
-		@NonNull
-		private final URI authorizationEndpoint;
-
-		@NonNull
-		private final URI tokenEndpoint;
-
-		@NotEmpty
-		private final String issuer;
+	/**
+	 * @param signingKeys The public key information that is used to validate signed JWT.
+	 *                    It can be retrieved from the IDP.
+	 */
+	public record IdpConfiguration(
+			@NonNull Map<String, PublicKey> signingKeys,
+			@NonNull URI authorizationEndpoint,
+			@NonNull URI tokenEndpoint,
+			@NonNull URI logoutEndpoint,
+			@NotEmpty String issuer) {
 	}
 
-	public ConqueryAuthenticationRealm createRealm(ManagerNode manager) {
-		List<TokenVerifier.Predicate<AccessToken>> additionalVerifiers = new ArrayList<>();
+    /**
+     * State container for auth flow
+     * @param callbackUri The URI the IDP should return the user to, after successful authentication
+     * @param returnUri The URI the user tried to access, that triggered this auth-flow
+     */
+	record PendingAuthorizationRequest(URI callbackUri, URI returnUri) {
+	}
+
+	public ConqueryAuthenticationRealm createRealm(Environment environment, ConqueryConfig config, AuthorizationController authorizationController) {
+		final List<TokenVerifier.Predicate<AccessToken>> additionalVerifiers = new ArrayList<>();
 
 		for (String additionalTokenCheck : additionalTokenChecks) {
 			additionalVerifiers.add(ScriptedTokenChecker.create(additionalTokenCheck));
 		}
 
-		idpConfigurationSupplier = getIdpOptionsSupplier(manager.getClient());
-		authCookieCreator = manager.getConfig().getAuthentication()::createAuthCookie;
 
-		// Add login schema for admin end
-		final RedirectingAuthFilter redirectingAuthFilter = manager.getAuthController().getRedirectingAuthFilter();
-		redirectingAuthFilter.getAuthAttemptCheckers().add(this::checkAndRedeemAuthzCode);
-		redirectingAuthFilter.getAuthAttemptCheckers().add(this::checkAndRedeemRefreshToken);
-		redirectingAuthFilter.getLoginInitiators().add(this::initiateLogin);
+		idpConfigurationSupplier = getIdpOptionsSupplier(environment, config);
+		authCookieCreator = config.getAuthentication()::createAuthCookie;
 
-		return new JwtPkceVerifyingRealm(idpConfigurationSupplier, client, additionalVerifiers, alternativeIdClaims, tokenLeeway);
+		// Add login schema for admin UI
+		final DropwizardResourceConfig jerseyAdminUi = authorizationController.getAdminServlet().getJerseyConfigUI();
+		RedirectingAuthFilter.registerLoginInitiator(jerseyAdminUi, this::initiateLogin, "jwt-initiator");
+		RedirectingAuthFilter.registerAuthAttemptChecker(jerseyAdminUi, this::checkAndRedeemAuthzCode, "jwt-authz-redeemer");
+		RedirectingAuthFilter.registerAuthAttemptChecker(jerseyAdminUi, this::checkAndRedeemRefreshToken, "jwt-refresh-redeemer");
+
+		return new JwtPkceVerifyingRealm(idpConfigurationSupplier,
+										 client,
+										 additionalVerifiers,
+										 alternativeIdClaims,
+										 authorizationController.getStorage(),
+										 tokenLeeway,
+										 environment.getValidator()
+		);
 	}
 
 	@Data
@@ -163,15 +207,23 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		List<JWK> keys;
 	}
 
-	private Supplier<Optional<IdpConfiguration>> getIdpOptionsSupplier(final Client client) {
+	private Supplier<Optional<IdpConfiguration>> getIdpOptionsSupplier(Environment environment, ConqueryConfig config) {
 
 		return () -> {
 			if (idpConfiguration == null) {
 				synchronized (this) {
 					// check again since we are now in an exclusive section
 					if (idpConfiguration == null) {
-						// retrieve the configuration and cache it
-						idpConfiguration = retrieveIdpConfiguration(client);
+
+						final Client httpClient = new JerseyClientBuilder(environment).using(config.getJerseyClient())
+																					  .build(this.getClass().getSimpleName());
+						try {
+							// retrieve the configuration and cache it
+							idpConfiguration = retrieveIdpConfiguration(httpClient);
+						}
+						finally {
+							httpClient.close();
+						}
 					}
 				}
 			}
@@ -184,7 +236,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 	 *
 	 * @implNote Since this involves https requests, ensure to cache the returned value.
 	 */
-	private IdpConfiguration retrieveIdpConfiguration(final Client client) {
+	public IdpConfiguration retrieveIdpConfiguration(final Client client) {
 
 		if (wellKnownEndpoint == null) {
 			log.error("Cannot retrieve idp configuration, because no well-known endpoint was given");
@@ -209,6 +261,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		String issuer = response.get("issuer").asText();
 		URI authorizationEndpoint = URI.create(response.get("authorization_endpoint").asText());
 		URI tokenEndpoint = URI.create(response.get("token_endpoint").asText());
+		URI logoutEndpoint = URI.create(response.get("end_session_endpoint").asText());
 
 		URI jwksUri = URI.create(response.get("jwks_uri").asText());
 
@@ -229,14 +282,19 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		}
 
 
-		final List<JWK> keys = jwks.getKeys();
-		if (keys.size() != 1) {
-			throw new IllegalStateException("Expected exactly 1 jwk for realm but found: " + keys.size());
+		// Filter for keys that are used for signing (discard encryption keys)
+		final Map<String, PublicKey> signingKeys = jwks.getKeys().stream()
+													   .filter(jwk -> JWK.Use.SIG.asString().equals(jwk.getPublicKeyUse()))
+													   .collect(Collectors.toMap(JWK::getKeyId, JwtPkceVerifyingRealmFactory::getPublicKey));
+
+
+		if (signingKeys.isEmpty()) {
+			throw new IllegalStateException("No signing keys could be retrieved from IDP. Received these JWKs (Key Ids):" + jwks.getKeys()
+																																.stream()
+																																.map(JWK::getKeyId).toList());
 		}
 
-		JWK jwk = keys.get(0);
-
-		return new IdpConfiguration(getPublicKey(jwk), authorizationEndpoint, tokenEndpoint, issuer);
+		return new IdpConfiguration(signingKeys, authorizationEndpoint, tokenEndpoint, logoutEndpoint, issuer);
 	}
 
 
@@ -248,7 +306,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		return JWKParser.create().parse(jwkString).toPublicKey();
 	}
 
-	public static abstract class ScriptedTokenChecker extends Script implements TokenVerifier.Predicate<AccessToken> {
+	public abstract static class ScriptedTokenChecker extends Script implements TokenVerifier.Predicate<AccessToken> {
 
 		private final static GroovyShell SHELL;
 
@@ -289,12 +347,16 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 			return null;
 		}
 		JwtPkceVerifyingRealmFactory.IdpConfiguration idpConfiguration = idpConfigurationOpt.get();
-		return UriBuilder.fromUri(idpConfiguration.getAuthorizationEndpoint())
+		final URI callbackUri = UriBuilder.fromUri(RequestHelper.getRequestURL(request)).path(AdminServlet.ADMIN_UI).build();
+		final URI returnUri = toRootRelativeUri(request.getUriInfo().getRequestUri());
+		final String state = registerAuthorizationRequest(callbackUri, returnUri);
+
+		return UriBuilder.fromUri(idpConfiguration.authorizationEndpoint())
 						 .queryParam("response_type", "code")
 						 .queryParam("client_id", client)
-						 .queryParam("redirect_uri", UriBuilder.fromUri(RequestHelper.getRequestURL(request)).path(AdminServlet.ADMIN_UI).build())
+						 .queryParam("redirect_uri", callbackUri)
 						 .queryParam("scope", "openid")
-						 .queryParam("state", UUID.randomUUID()).build();
+						 .queryParam("state", state).build();
 	}
 
 
@@ -309,17 +371,23 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 			return null;
 		}
 
-		// Build the original redirect uri (the request uri without the query added by the IDP)
-		final URI redirectedUri = UriBuilder.fromUri(RequestHelper.getRequestURL(request)).replaceQuery("").build();
-		log.trace("Redirect URI: {}", redirectedUri);
+		// Rebuild the callback URI without the query added by the IDP and compare it to the URI used to initiate this authorization request.
+		final URI callbackUri =
+				UriBuilder.fromUri(RequestHelper.getRequestURL(request)).replacePath(request.getUriInfo().getAbsolutePath().getPath()).replaceQuery("").build();
+		final PendingAuthorizationRequest authorizationRequest = validateAndConsumeAuthorizationRequest(
+				request.getUriInfo().getQueryParameters().getFirst("state"),
+				callbackUri
+		);
+		log.trace("Redirect URI: {}", authorizationRequest.returnUri());
 
 		// Prepare code for exchange with access token
 		final AuthorizationCodeGrant authzGrant = new AuthorizationCodeGrant(
 				new AuthorizationCode(code),
-				redirectedUri);
+				authorizationRequest.callbackUri()
+		);
 
 		// Redeem code
-		AccessTokenResponse tokenResponse = getTokenResponse(request, authzGrant);
+		AccessTokenResponse tokenResponse = getTokenResponse(authzGrant);
 		if (tokenResponse == null) {
 			return null;
 		}
@@ -329,7 +397,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		final NewCookie refreshTokenCookie = prepareRefreshTokenCookie(request, tokenResponse);
 
 		// Let the client call the same uri again, but this time with valid credentials
-		return prepareRedirectResponse(redirectedUri, accessTokenCookie, refreshTokenCookie);
+		return prepareRedirectResponse(authorizationRequest.returnUri(), accessTokenCookie, refreshTokenCookie);
 	}
 
 
@@ -346,7 +414,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		}
 
 		// Redeem refresh token for a new access token (+  new refresh token)
-		final AccessTokenResponse tokenResponse = getTokenResponse(request, new RefreshTokenGrant(new RefreshToken(refreshToken.getValue())));
+		final AccessTokenResponse tokenResponse = getTokenResponse(new RefreshTokenGrant(new RefreshToken(refreshToken.getValue())));
 		if (tokenResponse == null) {
 			return null;
 		}
@@ -355,7 +423,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 		final Cookie accessTokenCookie = prepareAccessTokenCookie(request, tokenResponse);
 		final NewCookie refreshTokenCookie = prepareRefreshTokenCookie(request, tokenResponse);
 
-		return prepareRedirectResponse(request.getUriInfo().getRequestUriBuilder().replaceQuery("").build(), accessTokenCookie, refreshTokenCookie);
+		return prepareRedirectResponse(toRootRelativeUri(request.getUriInfo().getRequestUri()), accessTokenCookie, refreshTokenCookie);
 	}
 
 	/**
@@ -369,13 +437,56 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 				.build();
 	}
 
+	String registerAuthorizationRequest(URI callbackUri, URI returnUri) {
+		final String state = UUID.randomUUID().toString();
+		pendingAuthorizationRequests.put(state, new PendingAuthorizationRequest(callbackUri, returnUri));
+		return state;
+	}
+
+    /**
+     * Checks for the state existence and matches it's removes/consumes it
+     * @param state state identifier
+     * @param callbackUri URI of the current request
+     * @return The actual state for the auth-flow
+     */
+	PendingAuthorizationRequest validateAndConsumeAuthorizationRequest(String state, URI callbackUri) {
+		if (state == null) {
+			throw new BadRequestException("Authorization callback is missing its state");
+		}
+
+		final PendingAuthorizationRequest authorizationRequest = pendingAuthorizationRequests.asMap().remove(state);
+		if (authorizationRequest == null || !authorizationRequest.callbackUri().equals(callbackUri)) {
+			throw new BadRequestException("Authorization callback URI does not match the authorization request");
+		}
+		return authorizationRequest;
+	}
+
+	static URI toRootRelativeUri(URI requestUri) {
+
+        if (requestUri == null) {
+            throw new BadRequestException("Request URI was not provided");
+        }
+
+		if (!requestUri.isAbsolute()) {
+			throw new BadRequestException("Request URI must be absolute");
+		}
+
+		final String rawPath = requestUri.getRawPath();
+		if (rawPath == null || !rawPath.startsWith("/") || rawPath.startsWith("//")) {
+			throw new BadRequestException("Request URI has an invalid path");
+		}
+
+		final String rawQuery = requestUri.getRawQuery();
+		return URI.create(rawQuery == null ? rawPath : rawPath + "?" + rawQuery);
+	}
+
 	private Cookie prepareAccessTokenCookie(ContainerRequestContext request, AccessTokenResponse tokenResponse) {
 		com.nimbusds.oauth2.sdk.token.AccessToken accessToken = tokenResponse.getTokens().getAccessToken();
 		return authCookieCreator.apply(request, accessToken.getValue());
 	}
 
 	/**
-	 *	Extracts a refresh token and converts it into a cookies with the life span of that refresh token.
+	 * Extracts a refresh token and converts it into a cookies with the life span of that refresh token.
 	 */
 	@SneakyThrows(java.text.ParseException.class)
 	private NewCookie prepareRefreshTokenCookie(ContainerRequestContext request, AccessTokenResponse tokenResponse) {
@@ -406,7 +517,7 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 	 */
 	@Nullable
 	@SneakyThrows({ParseException.class, IOException.class})
-	private AccessTokenResponse getTokenResponse(ContainerRequestContext request, AuthorizationGrant authzGrant) {
+	private AccessTokenResponse getTokenResponse(AuthorizationGrant authzGrant) {
 
 		// Retrieve the IDP configuration
 		final Optional<IdpConfiguration> idpConfigurationOpt = idpConfigurationSupplier.get();
@@ -418,18 +529,19 @@ public class JwtPkceVerifyingRealmFactory implements AuthenticationRealmFactory 
 
 		// Send the auth code/refresh token to the IDP to redeem them for a new access and refresh token
 		final TokenRequest tokenRequest = new TokenRequest(
-				UriBuilder.fromUri(idpConfiguration.getTokenEndpoint()).build(),
+				UriBuilder.fromUri(idpConfiguration.tokenEndpoint()).build(),
 				new ClientID(client),
 				authzGrant
 		);
 
 		// Get the response
-		TokenResponse response = TokenResponse.parse(tokenRequest.toHTTPRequest().send());
+		HTTPRequest httpRequest = tokenRequest.toHTTPRequest();
+		TokenResponse response = TokenResponse.parse(httpRequest.send());
 
 		// Check if the response was valid
 		if (!response.indicatesSuccess()) {
 			HTTPResponse httpResponse = response.toHTTPResponse();
-			log.warn("Unable to retrieve access token from auth server: {}", httpResponse.getContent());
+			log.warn("Unable to retrieve access token from auth server. Request: {} Response: {}", httpRequest.getURL(), httpResponse.getBody());
 			return null;
 		}
 		else if (!(response instanceof AccessTokenResponse)) {

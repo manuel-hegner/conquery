@@ -1,17 +1,14 @@
-import styled from "@emotion/styled";
-import React, { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { tv } from "tailwind-variants";
 
-import QueryUploadConceptListModal from "../query-upload-concept-list-modal/QueryUploadConceptListModal";
+import { useDatasetId } from "../dataset/selectors";
 
 import Query from "./Query";
 import StandardQueryNodeEditor from "./StandardQueryNodeEditor";
 
-const Root = styled("div")`
-  flex-grow: 1;
-  height: 100%;
-  padding: 0 10px 10px 10px;
-  overflow: hidden;
-`;
+const root = tv({
+  base: ["pt-2 px-[10px] pb-[10px]", "overflow-hidden"],
+});
 
 export const QueryEditor = () => {
   const [editedNode, setEditedNode] = useState<{
@@ -19,14 +16,20 @@ export const QueryEditor = () => {
     orIdx: number;
   } | null>(null);
 
+  const datasetId = useDatasetId();
+  const onClose = useCallback(() => setEditedNode(null), []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: close the editor whenever the dataset changes
+  useEffect(() => {
+    onClose();
+  }, [datasetId, onClose]);
+
   return (
-    <Root>
+    <div className={root()}>
       <Query setEditedNode={setEditedNode} />
-      <StandardQueryNodeEditor
-        editedNode={editedNode}
-        setEditedNode={setEditedNode}
-      />
-      <QueryUploadConceptListModal />
-    </Root>
+      {editedNode && (
+        <StandardQueryNodeEditor editedNode={editedNode} onClose={onClose} />
+      )}
+    </div>
   );
 };

@@ -1,22 +1,49 @@
 package com.bakdata.conquery.models.identifiable.ids.specific;
 
+import java.util.Collection;
 import java.util.List;
 
-import com.bakdata.conquery.models.identifiable.ids.IId;
+import com.bakdata.conquery.models.datasets.concepts.Connector;
+import com.bakdata.conquery.models.datasets.concepts.select.Select;
+import com.bakdata.conquery.models.identifiable.ids.Id;
 import com.bakdata.conquery.models.identifiable.ids.IdIterator;
-import com.bakdata.conquery.models.identifiable.ids.NamespacedId;
-
+import com.bakdata.conquery.models.identifiable.ids.IdUtil;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 
 @Getter @EqualsAndHashCode(callSuper=true)
-public class ConnectorSelectId extends SelectId implements NamespacedId {
+public final class ConnectorSelectId extends SelectId {
 
 	private final ConnectorId connector;
-	
+
 	public ConnectorSelectId(ConnectorId connector, String select) {
 		super(select);
 		this.connector = connector;
+	}
+
+	@Override
+	public void collectIds(Collection<Id<?, ?>> collect) {
+		collect.add(this);
+		connector.collectIds(collect);
+	}
+
+	@Override
+	public DatasetId getDataset() {
+		return connector.getDataset();
+	}
+
+	@Override
+	public Select get() {
+		Connector resolvedConnector = connector.get();
+		if (resolvedConnector == null) {
+			return null;
+		}
+		return resolvedConnector.getSelectByName(getSelect());
+	}
+
+	@Override
+	public ConceptId findConcept() {
+		return connector.getConcept();
 	}
 
 	@Override
@@ -25,24 +52,15 @@ public class ConnectorSelectId extends SelectId implements NamespacedId {
 		super.collectComponents(components);
 	}
 
-	@Override
-	public DatasetId getDataset() {
-		return connector.getDataset();
-	}
 
-	public enum Parser implements IId.Parser<ConnectorSelectId> {
+	public enum Parser implements IdUtil.Parser<ConnectorSelectId> {
 		INSTANCE;
-		
+
 		@Override
 		public ConnectorSelectId parseInternally(IdIterator parts) {
 			String name = parts.next();
 			ConnectorId parent = ConnectorId.Parser.INSTANCE.parse(parts);
 			return new ConnectorSelectId(parent, name);
 		}
-	}
-
-	@Override
-	public ConceptId findConcept() {
-		return connector.getConcept();
 	}
 }

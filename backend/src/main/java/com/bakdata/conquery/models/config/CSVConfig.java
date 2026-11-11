@@ -1,23 +1,26 @@
 package com.bakdata.conquery.models.config;
 
-import java.io.File;
-import java.io.IOException;
+import java.io.OutputStream;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 
 import com.univocity.parsers.csv.CsvFormat;
 import com.univocity.parsers.csv.CsvParser;
 import com.univocity.parsers.csv.CsvParserSettings;
 import com.univocity.parsers.csv.CsvWriter;
 import com.univocity.parsers.csv.CsvWriterSettings;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.NonNull;
+import lombok.Setter;
+import lombok.With;
 import org.hibernate.validator.constraints.Length;
 
 /**
- * Holds the necessary information to configure CSV parsers and writers. 
+ * Holds the necessary information to configure CSV parsers and writers.
  */
 @Getter @Setter @With @AllArgsConstructor @NoArgsConstructor
 public class CSVConfig {
@@ -32,12 +35,12 @@ public class CSVConfig {
 	private boolean skipHeader = false;
 	private boolean parseHeaders = true;
 	private int maxColumns = 1_000_000; // This should be sufficiently large.
-	
+
 	/**
 	 * Helper method to generate parser settings from the provided options in this class.
 	 * @return Setting object that can be passed into a {@link CsvParser}.
 	 */
-	private CsvParserSettings createCsvParserSettings() {
+	public CsvParserSettings createCsvParserSettings() {
 		CsvParserSettings settings = new CsvParserSettings();
 		settings.setFormat(createCsvFormat());
 		settings.setHeaderExtractionEnabled(parseHeaders);
@@ -56,7 +59,7 @@ public class CSVConfig {
 		settings.setFormat(createCsvFormat());
 		return settings;
 	}
-	
+
 	/**
 	 * Helper method to generate format settings from the provided options in this class.
 	 * @return Format object that can be passed into {@link CsvWriterSettings} and {@link CsvParserSettings}.
@@ -90,11 +93,17 @@ public class CSVConfig {
 
 	/**
 	 * Creates a new CSV writer using the global settings from {@link ConqueryConfig} and an existing writer object to write through.
+	 *
 	 * @param writer The writer to write through.
 	 * @return The newly created writer.
 	 */
 	public CsvWriter createWriter(@NonNull Writer writer) {
 		return new CsvWriter(writer, createCsvWriterSettings());
+	}
+
+
+	public CsvWriter createWriter(@NonNull OutputStream out) {
+		return new CsvWriter(out, createCsvWriterSettings());
 	}
 
 }

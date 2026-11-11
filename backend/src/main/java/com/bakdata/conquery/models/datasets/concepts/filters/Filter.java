@@ -1,27 +1,33 @@
 package com.bakdata.conquery.models.datasets.concepts.filters;
 
+import java.util.List;
+
+import com.bakdata.conquery.apiv1.frontend.FrontendFilterConfiguration;
 import com.bakdata.conquery.io.cps.CPSBase;
-import com.bakdata.conquery.apiv1.frontend.FEFilter;
+import com.bakdata.conquery.models.config.ConqueryConfig;
 import com.bakdata.conquery.models.datasets.concepts.Connector;
-import com.bakdata.conquery.models.datasets.Column;
-import com.bakdata.conquery.models.datasets.Dataset;
-import com.bakdata.conquery.models.datasets.Import;
 import com.bakdata.conquery.models.exceptions.ConceptConfigurationException;
-import com.bakdata.conquery.models.identifiable.Labeled;
-import com.bakdata.conquery.models.identifiable.ids.NamespacedIdentifiable;
+import com.bakdata.conquery.models.identifiable.LabeledNamespaceIdentifiable;
+import com.bakdata.conquery.models.identifiable.ids.specific.ColumnId;
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import com.bakdata.conquery.models.identifiable.ids.specific.FilterId;
+import com.bakdata.conquery.models.identifiable.ids.specific.TableId;
 import com.bakdata.conquery.models.query.queryplan.filter.FilterNode;
+import com.bakdata.conquery.sql.conversion.model.filter.FilterConverter;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import io.dropwizard.validation.ValidationMethod;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * This class is the abstract superclass for all filters.
+ * Common base class for all filters. Implementations should extend either {@link EventFilter} or
+ * {@link AggregationFilter}, depending on when their filter node is evaluated.
  */
 @Getter
 @Setter
@@ -29,59 +35,74 @@ import lombok.extern.slf4j.Slf4j;
 @JsonTypeInfo(use = JsonTypeInfo.Id.CUSTOM, property = "type")
 @CPSBase
 @Slf4j
-public abstract class Filter<FE_TYPE> extends Labeled<FilterId> implements NamespacedIdentifiable<FilterId> {
+@EqualsAndHashCode(callSuper = true)
+public abstract sealed class Filter<FILTER_VALUE> extends LabeledNamespaceIdentifiable<FilterId>
+		permits AggregationFilter, EventFilter {
 
 	private String unit;
-	private String description;
+	@JsonAlias("description")
+	private String tooltip;
 	@JsonBackReference
+	@EqualsAndHashCode.Exclude
 	private Connector connector;
 	private String pattern;
 	private Boolean allowDropFile;
 
+	private FILTER_VALUE defaultValue;
+
 	@JsonIgnore
 	@Override
-	public Dataset getDataset() {
+	public DatasetId getDataset() {
 		return getConnector().getDataset();
 	}
 
-	public abstract void configureFrontend(FEFilter f) throws ConceptConfigurationException;
-
-	@JsonIgnore
-	public abstract Column[] getRequiredColumns();
-
-	public abstract FilterNode<?> createFilterNode(FE_TYPE filterValue);
-
-	@Override
-	public FilterId createId() {
-		return new FilterId(connector.getId(), getName());
+	public FrontendFilterConfiguration.Top createFrontendConfig(ConqueryConfig conqueryConfig) throws ConceptConfigurationException {
+		final FrontendFilterConfiguration.Top f = FrontendFilterConfiguration.Top.builder()
+																				 .id(getId())
+																				 .label(getLabel())
+																				 .tooltip(getTooltip())
+																				 .unit(getUnit())
+																				 .allowDropFile(getAllowDropFile())
+																				 .pattern(getPattern())
+																				 .defaultValue(getDefaultValue())
+																				 .build();
+		configureFrontend(f, conqueryConfig);
+		return f;
 	}
 
-	/**
-	 * This method is called once at startup or if the dataset changes for each new import that
-	 * concerns this filter. Use this to collect metadata from the import. It is not guaranteed that
-	 * any blocks or cBlocks exist at this time. Any data created by this method should be volatile
-	 * and @JsonIgnore.
-	 *
-	 * @param imp the import added
-	 */
-	public void addImport(Import imp) {
-	}
+	protected abstract void configureFrontend(FrontendFilterConfiguration.Top f, ConqueryConfig conqueryConfig) throws ConceptConfigurationException;
+
+	public abstract FilterNode<?> createFilterNode(FILTER_VALUE filterValue);
 
 	@JsonIgnore
 	@ValidationMethod(message = "Not all Filters are for Connector's table.")
 	public boolean isForConnectorsTable() {
 		boolean valid = true;
 
-		for (Column column : getRequiredColumns()) {
-			if (column == null || column.getTable() == connector.getTable()) {
+		for (ColumnId column : getRequiredColumns()) {
+			TableId tableId = connector.resolveTableId();
+			if (column == null || column.getTable().equals(tableId)) {
 				continue;
 			}
 
-			log.error("Filter[{}] of Table[{}] is not of Connector[{}]#Table[{}]", getId(), column.getTable().getId(), connector.getId(), connector.getTable().getId());
+			log.error("Filter[{}] of Table[{}] is not of Connector[{}]#Table[{}]", getId(), column.getTable(), connector.getId(), tableId);
 
 			valid = false;
 		}
 
 		return valid;
+	}
+
+	@JsonIgnore
+	public abstract List<ColumnId> getRequiredColumns();
+
+	@JsonIgnore
+	public <F extends Filter<FILTER_VALUE>> FilterConverter<F, FILTER_VALUE> createConverter() {
+		throw new UnsupportedOperationException("No converter implemented for Filter %s".formatted(getClass()));
+	}
+
+	@Override
+	public FilterId createId() {
+		return new FilterId(connector.getId(), getName());
 	}
 }

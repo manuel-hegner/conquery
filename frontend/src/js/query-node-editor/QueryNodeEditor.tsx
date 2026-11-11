@@ -1,173 +1,118 @@
-import styled from "@emotion/styled";
-import React, { useCallback, useRef, useState } from "react";
-import Hotkeys from "react-hot-keys";
-import { useTranslation } from "react-i18next";
-import { useDispatch } from "react-redux";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useHotkeys } from "react-hotkeys-hook";
+import { tv } from "tailwind-variants";
 
 import type { PostPrefixForSuggestionsParams } from "../api/api";
-import {
+import type {
   ConceptIdT,
-  CurrencyConfigT,
-  DatasetIdT,
+  PostFilterSuggestionsResponseT,
   SelectOptionT,
   SelectorResultType,
 } from "../api/types";
-import TransparentButton from "../button/TransparentButton";
 import { useResizeObserver } from "../common/helpers/useResizeObserver";
-import { nodeHasActiveFilters, nodeIsConceptQueryNode } from "../model/node";
+import {
+  type NodeResetConfig,
+  nodeHasEmptySettings,
+  nodeIsConceptQueryNode,
+} from "../model/node";
 import type {
   DragItemConceptTreeNode,
+  FilterWithValueType,
   StandardQueryNodeT,
 } from "../standard-query-editor/types";
-import WithTooltip from "../tooltip/WithTooltip";
-import EditableText from "../ui-components/EditableText";
-import type { ModeT } from "../ui-components/InputRange";
 
 import ContentColumn from "./ContentColumn";
 import MenuColumn from "./MenuColumn";
-import ResetAllFiltersButton from "./ResetAllFiltersButton";
-import { createQueryNodeEditorActions } from "./actions";
-import { QueryNodeEditorStateT } from "./reducer";
+import NodeName from "./NodeName";
+import ResetAndClose from "./ResetAndClose";
+import { useAutoLabel } from "./useAutoLabel";
+import { useSectionSpy } from "./useSectionSpy";
 
-const Root = styled("div")`
-  padding: 0 20px 10px;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  position: absolute;
-  z-index: 1;
-  background-color: ${({ theme }) => theme.col.bg};
-`;
+const root = tv({
+  base: ["absolute inset-0", "z-2", "p-2", "bg-bg-50"],
+});
 
-const ContentWrap = styled("div")`
-  background-color: white;
-  box-shadow: 1px 2px 5px 0 rgba(0, 0, 0, 0.2);
-  border: 1px solid ${({ theme }) => theme.col.grayMediumLight};
-  border-radius: ${({ theme }) => theme.borderRadius};
-  flex-grow: 1;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-`;
+const contentWrap = tv({
+  base: [
+    "flex flex-col",
+    "grow",
+    "h-full w-full",
+    "overflow-hidden",
+    "rounded",
+    "border border-gray-400",
+    "bg-white",
+    "shadow-[1px_2px_5px_0_rgba(0,0,0,0.2)]",
+  ],
+});
 
-const Wrapper = styled("div")`
-  flex-grow: 1;
-  width: 100%;
-  overflow: hidden;
-`;
-const ScrollContainer = styled("div")`
-  position: relative;
-  display: flex;
-  flex-direction: row;
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  background-color: ${({ theme }) => theme.col.bg};
-  --webkit-overflow-scrolling: touch;
-`;
+// the original also declared `--webkit-overflow-scrolling: touch` —
+// a typo (double dash) that only defined an unused custom property, dropped
+const scrollContainer = tv({
+  base: [
+    "relative",
+    "flex flex-row",
+    "h-full w-full",
+    "overflow-y-auto",
+    "bg-bg-50",
+  ],
+});
 
-const SxMenuColumn = styled(MenuColumn)`
-  background-color: ${({ theme }) => theme.col.bg};
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  left: 0;
-`;
+const menuColumn = tv({
+  base: ["sticky top-0 left-0", "z-2", "bg-bg-50"],
+});
 
-const Header = styled("div")`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  border-bottom: 1px solid #ccc;
-  padding-right: 10px;
-`;
+const header = tv({
+  base: [
+    "flex items-center justify-between",
+    "gap-4",
+    "h-10 shrink-0",
+    "px-2",
+    "border-b border-gray-100",
+  ],
+});
 
-const Row = styled("div")`
-  display: flex;
-  align-items: center;
-`;
-
-const CloseButton = styled(TransparentButton)``;
-
-const NodeName = styled("div")`
-  padding: 10px 15px;
-`;
-
-export interface QueryNodeEditorPropsT {
+interface QueryNodeEditorPropsT {
   name: string;
-  editorState: QueryNodeEditorStateT;
   node: StandardQueryNodeT;
   showTables: boolean;
-  datasetId: DatasetIdT;
   allowlistedTables?: string[];
   blocklistedTables?: string[];
   allowlistedSelects?: SelectorResultType[];
   blocklistedSelects?: SelectorResultType[];
-  currencyConfig: CurrencyConfigT;
 
   onCloseModal: () => void;
   onUpdateLabel: (label: string) => void;
   onDropConcept: (node: DragItemConceptTreeNode) => void;
   onRemoveConcept: (conceptId: ConceptIdT) => void;
   onToggleTable: (tableIdx: number, isExcluded: boolean) => void;
-  onResetAllFilters: () => void;
-  onResetTable: (tableIdx: number) => void;
+  onResetAllSettings: (config: NodeResetConfig) => void;
+  onResetTable: (tableIdx: number, config: NodeResetConfig) => void;
   onToggleTimestamps?: () => void;
   onToggleSecondaryIdExclude?: () => void;
-  onSetFilterValue: (tableIdx: number, filterIdx: number, value: any) => void;
-  onSwitchFilterMode: (
+  onSetFilterValue: (
     tableIdx: number,
     filterIdx: number,
-    mode: ModeT,
+    value: FilterWithValueType["value"],
   ) => void;
   onLoadFilterSuggestions: (
     params: PostPrefixForSuggestionsParams,
     tableIdx: number,
     filterIdx: number,
-  ) => void;
-  onSetDateColumn: (tableIdx: number, value: string | null) => void;
+    config?: { returnOnly?: boolean },
+  ) => Promise<PostFilterSuggestionsResponseT | null>;
+  onSetDateColumn: (tableIdx: number, value: string) => void;
   onSelectSelects: (value: SelectOptionT[]) => void;
   onSelectTableSelects: (tableIdx: number, value: SelectOptionT[]) => void;
 }
 
-const COMPACT_WIDTH = 500;
-const RIGHT_SIDE_WIDTH = 320;
-const RIGHT_SIDE_WIDTH_COMPACT = 150;
+const COMPACT_WIDTH = 600;
 
 const QueryNodeEditor = ({ node, ...props }: QueryNodeEditorPropsT) => {
-  const { t } = useTranslation();
-  const dispatch = useDispatch();
-  const [editingLabel, setEditingLabel] = useState<boolean>(false);
-  const [selectedTableIdx, setSelectedTableIdx] = useState<number | null>(null);
-
-  const { setFocusedInput, reset } = createQueryNodeEditorActions(props.name);
-
-  const onReset = () => dispatch(reset());
-  const onShowDescription = (filterIdx: number) =>
-    dispatch(setFocusedInput(filterIdx));
-
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const onCommonSettingsClick = () => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
+  const { activeSection, registerSection, registerSentinel, scrollToSection } =
+    useSectionSpy(scrollContainerRef);
 
-  function close() {
-    if (!node) return;
-
-    props.onCloseModal();
-    onReset();
-  }
-
-  // To make sure that Close button is always visible and to consider
-  // that QueryNodeEditor may be contained in a horizontally resizeable panel
-  // that's resized independent of the window width.
-  // TODO: Once https://caniuse.com/css-container-queries ships, use those instead
+  // no container query: compact mode also swaps in a tooltip
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [parentWidth, setParentWidth] = useState<number>(0);
   const isCompact = parentWidth < COMPACT_WIDTH;
@@ -180,12 +125,27 @@ const QueryNodeEditor = ({ node, ...props }: QueryNodeEditorPropsT) => {
     parentRef.current,
   );
 
-  if (!node) return null;
+  useHotkeys("esc", props.onCloseModal);
 
-  const hasActiveFilters = nodeHasActiveFilters(node);
+  const showClearReset = !nodeHasEmptySettings(node);
+
+  const { autoLabel, autoLabelEnabled, setAutoLabelEnabled } = useAutoLabel({
+    node,
+    onUpdateLabel: props.onUpdateLabel,
+  });
+  const nodeLabel = useMemo(
+    () =>
+      !nodeIsConceptQueryNode(node)
+        ? node.label || node.id
+        : autoLabelEnabled && autoLabel && node.ids.length > 1
+          ? autoLabel
+          : node.label,
+    [autoLabel, autoLabelEnabled, node],
+  );
 
   return (
-    <Root
+    <div
+      className={root()}
       ref={(instance) => {
         if (instance && parentWidth === 0) {
           setParentWidth(instance.getBoundingClientRect().width);
@@ -193,78 +153,44 @@ const QueryNodeEditor = ({ node, ...props }: QueryNodeEditorPropsT) => {
         parentRef.current = instance;
       }}
     >
-      <ContentWrap>
-        <Hotkeys keyName="escape" onKeyDown={close} />
-        <Header>
+      <div className={contentWrap()}>
+        <div className={header()}>
           <NodeName
-            style={{
-              maxWidth:
-                parentWidth -
-                (isCompact || !hasActiveFilters
-                  ? RIGHT_SIDE_WIDTH_COMPACT
-                  : RIGHT_SIDE_WIDTH),
+            allowEditing={nodeIsConceptQueryNode(node)}
+            label={nodeLabel}
+            onUpdateLabel={(label) => {
+              setAutoLabelEnabled(false);
+              props.onUpdateLabel(label);
             }}
-          >
-            {nodeIsConceptQueryNode(node) && (
-              <EditableText
-                large
-                loading={false}
-                text={node.label}
-                tooltip={t("help.editConceptName")}
-                selectTextOnMount={true}
-                editing={editingLabel}
-                onSubmit={(value) => {
-                  props.onUpdateLabel(value);
-                  setEditingLabel(false);
-                }}
-                onToggleEdit={() => setEditingLabel(!editingLabel)}
-              />
-            )}
-            {node.isPreviousQuery && (node.label || node.id || node.ids)}
-          </NodeName>
-          <Row>
-            {hasActiveFilters && (
-              <ResetAllFiltersButton
-                onClick={props.onResetAllFilters}
-                compact={isCompact}
-              />
-            )}
-            <WithTooltip text={t("common.saveAndCloseEsc")}>
-              <CloseButton small onClick={close}>
-                {t("common.save")}
-              </CloseButton>
-            </WithTooltip>
-          </Row>
-        </Header>
-        <Wrapper>
-          <ScrollContainer ref={scrollContainerRef}>
-            <SxMenuColumn
+          />
+          <ResetAndClose
+            isCompact={isCompact}
+            onClose={props.onCloseModal}
+            onResetAllSettings={props.onResetAllSettings}
+            showClearReset={showClearReset}
+          />
+        </div>
+        <div className="w-full grow overflow-hidden">
+          <div className={scrollContainer()} ref={scrollContainerRef}>
+            <MenuColumn
+              className={menuColumn()}
               node={node}
-              selectedTableIdx={selectedTableIdx}
+              activeSection={activeSection}
               showTables={props.showTables}
               blocklistedTables={props.blocklistedTables}
               allowlistedTables={props.allowlistedTables}
-              onCommonSettingsClick={onCommonSettingsClick}
               onDropConcept={props.onDropConcept}
               onRemoveConcept={props.onRemoveConcept}
-              onToggleTable={(tableIdx, isExcluded) => {
-                if (isExcluded && selectedTableIdx === tableIdx) {
-                  setSelectedTableIdx(null);
-                }
-
-                props.onToggleTable(tableIdx, isExcluded);
-              }}
-              onSelectTable={setSelectedTableIdx}
+              onToggleTable={props.onToggleTable}
+              onSelectSection={scrollToSection}
               onResetTable={props.onResetTable}
             />
             <ContentColumn
               node={node}
-              datasetId={props.datasetId}
-              currencyConfig={props.currencyConfig}
-              selectedTableIdx={selectedTableIdx}
+              registerSection={registerSection}
+              registerSentinel={registerSentinel}
               allowlistedSelects={props.allowlistedSelects}
               blocklistedSelects={props.blocklistedSelects}
-              onShowDescription={onShowDescription}
               onToggleTimestamps={props.onToggleTimestamps}
               onToggleSecondaryIdExclude={props.onToggleSecondaryIdExclude}
               onSelectSelects={props.onSelectSelects}
@@ -272,12 +198,11 @@ const QueryNodeEditor = ({ node, ...props }: QueryNodeEditorPropsT) => {
               onLoadFilterSuggestions={props.onLoadFilterSuggestions}
               onSetDateColumn={props.onSetDateColumn}
               onSetFilterValue={props.onSetFilterValue}
-              onSwitchFilterMode={props.onSwitchFilterMode}
             />
-          </ScrollContainer>
-        </Wrapper>
-      </ContentWrap>
-    </Root>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 

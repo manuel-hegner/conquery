@@ -7,9 +7,9 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 public interface RoleOwner {
 
-	void addRole(Role role);
+	void addRole(RoleId role);
 
-	void removeRole(Role role);
+	void removeRole(RoleId role);
 
 	/**
 	 * Return a copy of the roles hold by the owner.
@@ -19,4 +19,5 @@ public interface RoleOwner {
 	//TODO migrate to NsIdRef Role
 	@JsonIgnore
 	Set<RoleId> getRoles();
+
 }

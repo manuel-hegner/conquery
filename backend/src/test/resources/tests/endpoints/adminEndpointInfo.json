@@ -15,6 +15,16 @@
     "clazz": "AdminDatasetResource"
   },
   {
+    "method": "POST",
+    "path": "/datasets/{dataset}/preview",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "DELETE",
+    "path": "/datasets/{dataset}/preview",
+    "clazz": "AdminDatasetResource"
+  },
+  {
     "method": "GET",
     "path": "/datasets/{dataset}",
     "clazz": "AdminDatasetResource"
@@ -26,6 +36,11 @@
   },
   {
     "method": "POST",
+    "path": "/datasets/{dataset}/concepts",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "PUT",
     "path": "/datasets/{dataset}/concepts",
     "clazz": "AdminDatasetResource"
   },
@@ -42,11 +57,6 @@
   {
     "method": "POST",
     "path": "/datasets/{dataset}/cqpp",
-    "clazz": "AdminDatasetResource"
-  },
-  {
-    "method": "POST",
-    "path": "/datasets/{dataset}/imports",
     "clazz": "AdminDatasetResource"
   },
   {
@@ -70,8 +80,43 @@
     "clazz": "AdminDatasetResource"
   },
   {
+    "method": "POST",
+    "path": "/datasets/{dataset}/internToExtern",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "POST",
+    "path": "/datasets/{dataset}/searchIndex",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "GET",
+    "path": "/datasets/{dataset}/searchIndex",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "GET",
+    "path": "/datasets/{dataset}/searchIndex/{searchIndexId}",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "POST",
+    "path": "/datasets/{dataset}/clear-index-cache",
+    "clazz": "AdminDatasetResource"
+  },
+  {
     "method": "DELETE",
     "path": "/datasets/{dataset}/secondaryId/{secondaryId}",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "DELETE",
+    "path": "/datasets/{dataset}/internToExtern/{internToExternId}",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "DELETE",
+    "path": "/datasets/{dataset}/searchIndex/{searchIndexId}",
     "clazz": "AdminDatasetResource"
   },
   {
@@ -116,17 +161,17 @@
   },
   {
     "method": "PUT",
-    "path": "/datasets/{dataset}/imports",
-    "clazz": "AdminDatasetResource"
-  },
-  {
-    "method": "PUT",
     "path": "/datasets/{dataset}/cqpp",
     "clazz": "AdminDatasetResource"
   },
   {
     "method": "POST",
     "path": "/datasets/{dataset}/update-matching-stats",
+    "clazz": "AdminDatasetResource"
+  },
+  {
+    "method": "POST",
+    "path": "/datasets/{dataset}/update-filter-search",
     "clazz": "AdminDatasetResource"
   },
   {
@@ -173,6 +218,11 @@
     "method": "POST",
     "path": "/groups/{groupId}/roles/{roleId}",
     "clazz": "GroupResource"
+  },
+  {
+    "method": "POST",
+    "path": "/index-service/reset",
+    "clazz": "AdminResource"
   },
   {
     "method": "DELETE",
@@ -241,12 +291,12 @@
   },
   {
     "method": "GET",
-    "path": "/logout",
+    "path": "/jobs/",
     "clazz": "AdminResource"
   },
   {
     "method": "GET",
-    "path": "/jobs/",
+    "path": "/busy",
     "clazz": "AdminResource"
   },
   {

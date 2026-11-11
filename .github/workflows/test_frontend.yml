@@ -1,29 +1,35 @@
 name: "Test Frontend"
 
+# Called from ci.yml, which decides based on the changed paths whether this runs.
 on:
-  pull_request:
-    paths:
-      - "frontend/**"
+  workflow_call:
 
 jobs:
-  unit-tests:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 6
-    strategy:
-      matrix:
-        node-version: [16.x]
     steps:
-      - uses: actions/checkout@v2
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
       - name: install dependencies
         working-directory: ./frontend
-        run: yarn
+        run: pnpm install --frozen-lockfile
       - name: setup env variables
         working-directory: ./frontend
         run: cp .env.example .env
+      - name: lint and check format
+        working-directory: ./frontend
+        run: pnpm biome ci
+      - name: find unused files, exports and dependencies
+        working-directory: ./frontend
+        run: pnpm knip
       - name: test
         working-directory: ./frontend
-        run: yarn test
+        run: pnpm test

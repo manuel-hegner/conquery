@@ -1,17 +1,14 @@
 import type { ConceptIdT, ConceptT } from "../api/types";
 
-import type { TreesT } from "./reducer";
-
-export const doesQueryMatchNode = (node: ConceptT, query: string) => {
+const doesQueryMatchNode = (node: ConceptT, query: string) => {
   return (
     node.label.toLowerCase().includes(query) ||
-    (node.description && node.description.toLowerCase().includes(query)) ||
-    (node.additionalInfos &&
-      node.additionalInfos
-        .map(({ value }) => value)
-        .join("")
-        .toLowerCase()
-        .includes(query))
+    node.description?.toLowerCase().includes(query) ||
+    node.additionalInfos
+      ?.map(({ value }) => value)
+      .join("")
+      .toLowerCase()
+      .includes(query)
   );
 };
 
@@ -33,7 +30,7 @@ export const doesQueryMatchNode = (node: ConceptT, query: string) => {
     this object through the recursion and define new properties as we go (side effects)
 */
 export const findConcepts = (
-  trees: TreesT,
+  trees: Record<string, Record<string, ConceptT>>,
   treeId: string,
   nodeId: ConceptIdT,
   node: ConceptT,
@@ -60,17 +57,17 @@ export const findConcepts = (
   // Count node as 1 already, if it matches
   let sum = isNodeIncluded ? 1 : 0;
 
-  for (let child of node.children) {
+  for (const childId of node.children) {
     const result = findConcepts(
       trees,
       treeId,
-      child,
-      trees[treeId][child],
+      childId,
+      trees[treeId][childId],
       query,
       intermediateResult,
     );
 
-    sum += result[child] || 0;
+    sum += result[childId] || 0;
   }
 
   if (sum !== 0) {

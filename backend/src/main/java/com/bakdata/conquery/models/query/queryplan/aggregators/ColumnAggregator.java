@@ -1,5 +1,6 @@
 package com.bakdata.conquery.models.query.queryplan.aggregators;
 
+import java.util.List;
 import java.util.Set;
 
 import com.bakdata.conquery.models.datasets.Column;
@@ -18,31 +19,31 @@ public abstract class ColumnAggregator<T> extends Aggregator<T> {
 		}
 	}
 
-	public abstract Column[] getRequiredColumns();
+	public abstract List<Column> getRequiredColumns();
 
 	@Override
-	public abstract void acceptEvent(Bucket bucket, int event);
-
-	@Override
-	public String toString(){
-		return getClass().getSimpleName();
-	}
-
+	public abstract void consumeEvent(Bucket bucket, int event);
 
 	/**
 	 * Skip all buckets where none of the required columns have values.
+	 *
 	 * @param bucket
 	 * @return
 	 */
 	@Override
 	public boolean isOfInterest(Bucket bucket) {
 		for (Column column : getRequiredColumns()) {
-			if (!bucket.getStores()[column.getPosition()].isEmpty()) {
+			if (!bucket.getStore(column).isEmpty()) {
 				return true;
 			}
 		}
 
 		return false;
+	}
+
+	@Override
+	public String toString() {
+		return "ColumnAggregator(column=" + getRequiredColumns() + ')';
 	}
 
 }

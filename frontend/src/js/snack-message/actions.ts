@@ -1,4 +1,6 @@
-import { ActionType, createAction } from "typesafe-actions";
+import { type ActionType, createAction } from "typesafe-actions";
+
+import type { SnackMessageStateT } from "./reducer";
 
 export type SnackMessageActions = ActionType<
   typeof setMessage | typeof resetMessage
@@ -6,6 +8,7 @@ export type SnackMessageActions = ActionType<
 
 export const setMessage = createAction("snack-message/SET")<{
   message: string | null;
+  type: SnackMessageStateT["type"];
 }>();
 
 export const resetMessage = createAction("snack-message/RESET")();

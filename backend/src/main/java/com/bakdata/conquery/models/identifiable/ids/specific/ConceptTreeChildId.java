@@ -1,27 +1,38 @@
 package com.bakdata.conquery.models.identifiable.ids.specific;
 
+import java.util.Collection;
 import java.util.List;
 
+import com.bakdata.conquery.models.datasets.concepts.Concept;
 import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeChild;
-import com.bakdata.conquery.models.identifiable.ids.IId;
+import com.bakdata.conquery.models.identifiable.ids.Id;
 import com.bakdata.conquery.models.identifiable.ids.IdIterator;
-import com.bakdata.conquery.models.identifiable.ids.NamespacedId;
-
+import com.bakdata.conquery.models.identifiable.ids.IdUtil;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 
 @Getter @AllArgsConstructor @EqualsAndHashCode(callSuper=false)
-public class ConceptTreeChildId extends ConceptElementId<ConceptTreeChild> implements NamespacedId {
+public final class ConceptTreeChildId extends ConceptElementId<ConceptTreeChild> {
 
 	private final ConceptElementId<?> parent;
 	private final String name;
-	
+
 	@Override
 	public DatasetId getDataset() {
 		return parent.getDataset();
 	}
-	
+
+	@Override
+	public ConceptTreeChild get() {
+		Concept<?> concept = getDomain().getStorage(getDataset())
+										.getConcept(findConcept());
+		if (concept == null) {
+			return null;
+		}
+		return (ConceptTreeChild) concept.findById(this);
+	}
+
 	@Override
 	public ConceptId findConcept() {
 		return parent.findConcept();
@@ -32,10 +43,17 @@ public class ConceptTreeChildId extends ConceptElementId<ConceptTreeChild> imple
 		parent.collectComponents(components);
 		components.add(name);
 	}
-	
-	public static enum Parser implements IId.Parser<ConceptTreeChildId> {
+
+	@Override
+	public void collectIds(Collection<Id<?, ?>> collect) {
+		collect.add(this);
+		parent.collectIds(collect);
+	}
+
+
+	public enum Parser implements IdUtil.Parser<ConceptTreeChildId> {
 		INSTANCE;
-		
+
 		@Override
 		public ConceptTreeChildId parseInternally(IdIterator parts) {
 			String childName = parts.next();

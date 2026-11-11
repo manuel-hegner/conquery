@@ -1,0 +1,96 @@
+package com.bakdata.conquery.integration.json;
+
+import static com.bakdata.conquery.integration.common.LoadingUtil.*;
+
+import java.io.File;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.core.UriBuilder;
+
+import com.bakdata.conquery.integration.common.LoadingUtil;
+import com.bakdata.conquery.integration.common.RequiredData;
+import com.bakdata.conquery.integration.common.RequiredTable;
+import com.bakdata.conquery.integration.json.filter.FilterTest;
+import com.bakdata.conquery.models.datasets.Dataset;
+import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeConnector;
+import com.bakdata.conquery.models.identifiable.ids.specific.TableId;
+import com.bakdata.conquery.util.support.StandaloneSupport;
+
+public class WorkerTestDataImporter implements TestDataImporter {
+
+	@Override
+	public void importQueryTestData(StandaloneSupport support, QueryTest test) throws Exception {
+
+		RequiredData content = test.getContent();
+
+		importSecondaryIds(support, content.getSecondaryIds());
+		importInternToExternMappers(support, test.getInternToExternMappings());
+
+		importSearchIndexes(support, test.getSearchIndexes());
+		importTables(support, content.getTables(), content.isAutoConcept());
+		importConcepts(support, test.getRawConcepts());
+		waitUntilDone(support, () -> importTableContents(support, content.getTables()));
+		importIdMapping(support, content);
+		importPreviousQueries(support, content);
+		waitUntilDone(support, () -> LoadingUtil.updateMatchingStats(support));
+	}
+
+	@Override
+	public void importFormTestData(StandaloneSupport support, FormTest test) throws Exception {
+
+		RequiredData content = test.getContent();
+
+		importSecondaryIds(support, content.getSecondaryIds());
+		importTables(support, content.getTables(), content.isAutoConcept());
+		importConcepts(support, test.getRawConcepts());
+		waitUntilDone(support, () -> importTableContents(support, content.getTables()));
+		importIdMapping(support, content);
+		importPreviousQueries(support, content);
+	}
+
+	@Override
+	public void importFilterTestData(StandaloneSupport support, FilterTest test) throws Exception {
+
+		RequiredData content = test.getContent();
+
+		importInternToExternMappers(support, test.getInternToExternMappings());
+		importSearchIndexes(support, test.getSearchIndices());
+		importTables(support, content.getTables(), content.isAutoConcept());
+
+
+		test.setConnector(LoadingUtil.parseSubTree(
+								  support,
+								  test.getRawConnector(),
+								  ConceptTreeConnector.class,
+								  conn -> {
+									  conn.setTable(new TableId(support.getDataset().getDataset(), FilterTest.TABLE_NAME));
+									  conn.setConcept(test.getConcept());
+								  },
+								  false
+						  )
+		);
+		test.getConcept().setConnectors(Collections.singletonList((ConceptTreeConnector) test.getConnector()));
+
+		waitUntilDone(support, () -> LoadingUtil.uploadConcept(support, support.getDataset(), test.getConcept()));
+		waitUntilDone(support, () -> importTableContents(support, content.getTables()));
+		waitUntilDone(support, () -> LoadingUtil.updateMatchingStats(support));
+	}
+
+
+	@Override
+	public void importTableContents(StandaloneSupport support, Collection<RequiredTable> tables) throws Exception {
+		List<File> cqpps = generateCqpp(support, tables);
+		importCqppFiles(support, cqpps);
+	}
+
+	@Override
+	public void importDataset(Client client, UriBuilder adminUriBuilder, String name) {
+		Dataset dataset = new Dataset(name);
+		LoadingUtil.importDataset(client, adminUriBuilder, dataset);
+	}
+
+
+
+}

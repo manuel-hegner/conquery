@@ -3,13 +3,13 @@ package com.bakdata.conquery.models.preproc.parser.specific;
 import javax.annotation.Nonnull;
 
 import com.bakdata.conquery.models.config.ConqueryConfig;
-import com.bakdata.conquery.models.config.ParserConfig;
 import com.bakdata.conquery.models.events.stores.primitive.BitSetStore;
 import com.bakdata.conquery.models.events.stores.root.BooleanStore;
 import com.bakdata.conquery.models.exceptions.ParsingException;
 import com.bakdata.conquery.models.preproc.parser.ColumnValues;
 import com.bakdata.conquery.models.preproc.parser.Parser;
 import lombok.ToString;
+import org.jetbrains.annotations.NotNull;
 
 @ToString(callSuper = true)
 public class BooleanParser extends Parser<Boolean, BooleanStore> {
@@ -20,18 +20,16 @@ public class BooleanParser extends Parser<Boolean, BooleanStore> {
 
 	@Override
 	protected Boolean parseValue(@Nonnull String value) throws ParsingException {
-		switch (value) {
-			case "J":
-			case "true":
-			case "1":
-				return true;
-			case "N":
-			case "false":
-			case "0":
-				return false;
-			default:
-				throw new ParsingException("The value " + value + " does not seem to be of type boolean.");
-		}
+		return parseBoolean(value);
+	}
+
+	@NotNull
+	public static Boolean parseBoolean(@NotNull String value) {
+		return switch (value) {
+			case "J", "true", "1" -> true;
+			case "N", "false", "0" -> false;
+			default -> throw new ParsingException("The value " + value + " does not seem to be of type boolean.");
+		};
 	}
 
 	@Override
@@ -41,6 +39,11 @@ public class BooleanParser extends Parser<Boolean, BooleanStore> {
 
 	@Override
 	public void setValue(BooleanStore store, int event, Boolean value) {
+		if(value == null){
+			store.setNull(event);
+			return;
+		}
+
 		store.setBoolean(event, value);
 	}
 

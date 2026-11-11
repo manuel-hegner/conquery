@@ -2,24 +2,17 @@ package com.bakdata.conquery.models.datasets.concepts.tree;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-
+import jakarta.validation.Valid;
 import javax.annotation.CheckForNull;
-import javax.validation.Valid;
 
-import com.bakdata.conquery.io.jackson.serializer.NsIdRef;
+import com.bakdata.conquery.models.datasets.Column;
+import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.datasets.concepts.Connector;
 import com.bakdata.conquery.models.datasets.concepts.conditions.CTCondition;
 import com.bakdata.conquery.models.datasets.concepts.filters.Filter;
-import com.bakdata.conquery.models.datasets.Column;
-import com.bakdata.conquery.models.datasets.Table;
-import com.bakdata.conquery.models.events.Bucket;
-import com.bakdata.conquery.models.events.BucketEntry;
-import com.bakdata.conquery.models.events.CBlock;
 import com.bakdata.conquery.models.events.MajorTypeId;
-import com.bakdata.conquery.models.events.stores.root.StringStore;
-import com.bakdata.conquery.models.exceptions.ConceptConfigurationException;
-import com.bakdata.conquery.util.CalculatedValue;
+import com.bakdata.conquery.models.identifiable.ids.specific.ColumnId;
+import com.bakdata.conquery.models.identifiable.ids.specific.TableId;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import io.dropwizard.validation.ValidationMethod;
@@ -27,27 +20,29 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
-@Getter @Setter
+@Getter
+@Setter
 @Slf4j
 public class ConceptTreeConnector extends Connector {
 
 	private static final long serialVersionUID = 1L;
 
-	@NsIdRef @CheckForNull
-	private Table table;
+	@CheckForNull
+	private TableId table;
 
-	@NsIdRef @CheckForNull
-	private Column column = null;
+	@CheckForNull
+	private ColumnId column = null;
 
 	private CTCondition condition = null;
 
-	@Valid @JsonManagedReference
+	@Valid
+	@JsonManagedReference
 	private List<Filter<?>> filters = new ArrayList<>();
 
 	@JsonIgnore
 	@ValidationMethod(message = "Table and Column usage are exclusive")
 	public boolean isTableXOrColumn() {
-		if(table != null){
+		if (table != null) {
 			return column == null;
 		}
 
@@ -56,17 +51,41 @@ public class ConceptTreeConnector extends Connector {
 
 	@JsonIgnore
 	@ValidationMethod(message = "Column is not STRING.")
-	public boolean isColumnForTree(){
-		return column == null || column.getType().equals(MajorTypeId.STRING);
+	public boolean isColumnForTree() {
+		if (column == null) {
+			return true;
+		}
+		Column resolved = column.get();
+		if (resolved == null) {
+			return true;
+		}
+		return resolved.getType().equals(MajorTypeId.STRING);
 	}
 
-	@Override @JsonIgnore
-	public Table getTable() {
-		if(column != null){
+	@Override
+	@JsonIgnore
+	public Table getResolvedTable() {
+		if (column != null) {
+			return column.getTable().resolve();
+		}
+
+		if (table != null) {
+			return table.resolve();
+		}
+		return null;
+	}
+
+	@Override
+	@JsonIgnore
+	public TableId resolveTableId() {
+		if (column != null) {
 			return column.getTable();
 		}
 
-		return table;
+		if (table != null) {
+			return table;
+		}
+		return null;
 	}
 
 	@Override

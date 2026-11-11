@@ -1,10 +1,13 @@
 package com.bakdata.conquery.models.query.queryplan.specific.temporal;
 
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.OptionalInt;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import com.bakdata.conquery.models.common.CDateSet;
+import com.bakdata.conquery.models.common.daterange.CDateRange;
 import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.query.QueryExecutionContext;
@@ -12,142 +15,237 @@ import com.bakdata.conquery.models.query.entity.Entity;
 import com.bakdata.conquery.models.query.queryplan.ConceptQueryPlan;
 import com.bakdata.conquery.models.query.queryplan.QPNode;
 import com.bakdata.conquery.models.query.queryplan.aggregators.Aggregator;
-import com.bakdata.conquery.models.query.queryplan.aggregators.specific.SpecialDateUnion;
-import lombok.Getter;
+import com.bakdata.conquery.models.query.queryplan.aggregators.specific.ConstantValueAggregator;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * QueryNode implementing the logic for TemporalQueries.
- * Executes two queries and compares the times they are included, the entity is included according to a specified {@link PrecedenceMatcher}.
+ * We evaluate indexQueryPlan to test for inclusion, then use the date-result to evaluate compareQuery. All contiguous dates are combined to a single period.
  */
-@Getter
+@EqualsAndHashCode(callSuper = false)
+@Slf4j
+@Data
 public class TemporalQueryNode extends QPNode {
 
 	/**
-	 * Matcher to be used when testing for inclusion.
+	 * We need the AllIds-Table here, to ensure we get evaluated.
 	 */
-	private final PrecedenceMatcher matcher;
+	private final Table table;
 
 	/**
-	 * QueryPlan for the events to be compared to.
+	 * Query to select entities and periods to evaluate compareQuery against.
 	 */
-	private final SampledNode reference;
+	private final ConceptQueryPlan indexQueryPlan;
+	private final TemporalSelector indexSelector;
+	private final TemporalRelationMode indexMode;
 
 	/**
-	 * QueryPlan for the events being compared.
-	 */
-	private final SampledNode preceding;
-
-	/**
-	 * The {@link SpecialDateUnion} to be fed with the included dataset.
-	 */
-	private final SpecialDateUnion dateUnion;
-
-	public TemporalQueryNode(SampledNode reference, SampledNode preceding, PrecedenceMatcher matcher, SpecialDateUnion dateUnion) {
-		this.reference = reference;
-		this.preceding = preceding;
-		this.matcher = matcher;
-		this.dateUnion = dateUnion;
-	}
-
-	/**
-	 * Collects required tables of {@link #reference} and {@link #preceding} into {@code out}.
+	 * Compare Query to aggregate potentially satisfying periods. Sub results will be fed into innerCompareQueryPlan.
 	 *
-	 * @param out the set to be filled with data.
+	 * @implSpec This may not have aggregationFilters enabled as those will interfere with correctness.
 	 */
-	@Override
-	public void collectRequiredTables(Set<Table> out) {
-		out.addAll(getReference().getChild().collectRequiredTables());
-		out.addAll(getPreceding().getChild().collectRequiredTables());
-	}
+	private final ConceptQueryPlan outerCompareQueryPlan;
 
 	/**
-	 * Initializes the {@link TemporalQueryNode} and its children.
-	 *
+	 * Compare Query to compute results with aggregation-Filters and Aggregators enabled.
+	 * < br/>
+	 * Will be evaluated with sub-periods of outerCompareQueryPlan as date-restriction.
 	 */
+	private final ConceptQueryPlan innerCompareQueryPlan;
+
+	private final TemporalSelector compareSelector;
+
+
+	private final List<ConstantValueAggregator<List<Object>>> aggregationResults;
+	private final ConstantValueAggregator<CDateSet> compareDateAggregator = new ConstantValueAggregator<>(null);
+	private final ConstantValueAggregator<CDateSet> indexDateAggregator = new ConstantValueAggregator<>(null);
+
+	private CDateSet indexDateResult;
+
+	private CDateSet compareDateResult;
+
+	private boolean result = false;
+	private boolean hit = false;
+
+
 	@Override
 	public void init(Entity entity, QueryExecutionContext context) {
 		super.init(entity, context);
 
-		reference.getChild().init(context, entity);
-		preceding.getChild().init(context, entity);
-		dateUnion.init(entity, context);
-	}
+		indexQueryPlan.init(context, entity);
+		outerCompareQueryPlan.init(context, entity);
+		innerCompareQueryPlan.init(context, entity);
 
-	/**
-	 * Calls nextBlock on its children.
-	 */
-	@Override
-	public void nextBlock(Bucket bucket) {
-		reference.getChild().nextBlock(bucket);
-		preceding.getChild().nextBlock(bucket);
-	}
+		aggregationResults.forEach(agg -> agg.setValue(new ArrayList<>()));
 
-	/**
-	 * Calls nextBlock on its children.documentation code for refactored matchers.
-	 */
-	@Override
-	public void nextTable(QueryExecutionContext ctx, Table currentTable) {
-		reference.getChild().nextTable(ctx, currentTable);
-		preceding.getChild().nextTable(ctx, currentTable);
-	}
+		indexDateResult = CDateSet.createEmpty();
+		compareDateResult = CDateSet.createEmpty();
 
-	/**
-	 * Delegates aggregation to {@link #reference} and {@link #preceding}.
-	 */
-	@Override
-	public void acceptEvent(Bucket bucket, int event) {
-		reference.getChild().nextEvent(bucket, event);
-		preceding.getChild().nextEvent(bucket, event);
-	}
+		compareDateAggregator.setValue(compareDateResult);
+		indexDateAggregator.setValue(indexDateResult);
 
-	/**
-	 * Retrieves the {@link ConceptQueryPlan#getDateAggregator()} time of {@link #reference} and {@link #preceding}.
-	 * Then tests whether they match the specific criteria for inclusion.
-	 * If the criteria are met, the matching {@link CDateSet} is put into the @{@link SpecialDateUnion} node of the Queries associated QueryPlan.
-	 *
-	 * @return true, iff the Events match the specific criteria.
-	 */
-	@Override
-	public final boolean isContained() {
-		if (!reference.getChild().isContained()) {
-			return false;
-		}
-
-		CDateSet referenceDurations = CDateSet.create(getReference().getChild().getDateAggregator().createAggregationResult());
-		// Create copy as we are mutating the set
-		CDateSet precedingDurations = CDateSet.create(getPreceding().getChild().getDateAggregator().createAggregationResult());
-
-
-		OptionalInt sampledReference = getReference().getSampler().sample(referenceDurations);
-
-		if (sampledReference.isEmpty()) {
-			return false;
-		}
-
-		matcher.removePreceding(precedingDurations, sampledReference.getAsInt());
-
-		OptionalInt sampledPreceding = getPreceding().getSampler().sample(precedingDurations);
-
-		if (matcher.isContained(sampledReference, sampledPreceding)) {
-			dateUnion.merge(referenceDurations);
-			return true;
-		}
-
-		return false;
+		result = false;
+		hit = false;
 	}
 
 	@Override
-	public Collection<Aggregator<CDateSet>> getDateAggregators() {
-		return Set.of(dateUnion);
-	}
-
-	@Override
-	public boolean isOfInterest(Bucket bucket) {
-		return reference.getChild().isOfInterest(bucket) || preceding.getChild().isOfInterest(bucket);
+	public void collectRequiredTables(Set<Table> requiredTables) {
+		requiredTables.add(table);
 	}
 
 	@Override
 	public boolean isOfInterest(Entity entity) {
-		return reference.getChild().isOfInterest(entity) || preceding.getChild().isOfInterest(entity);
+		return indexQueryPlan.isOfInterest(entity) && innerCompareQueryPlan.isOfInterest(entity);
+	}
+
+	@Override
+	public boolean acceptEvent(Bucket bucket, int event) {
+		// Since this is evaluated by the AllIds table, this should be executed only once.
+		if (hit) {
+			return false;
+		}
+
+		hit = true;
+
+		result = evaluateTemporalQuery(context, entity);
+
+		// Does nothing
+		return false;
+	}
+
+	/**
+	 * Evaluate indexQueryPlan for indexPeriods.
+	 * Use result-dates with selector and mode to evaluate outerCompareQueryPlan, which produces subPeriods, to evaluate innerCompareQueryPlan.
+	 * <br />
+	 * outer- and innerCompareQueryPlan are identical, except that outer has all aggregations disabled, we are only interested in the periods, where inner _might_ be true.
+	 * Inner is evaluated with aggregations.
+	 * <br />
+	 * mode and selector filter periods to the relevant timestamps and eventually determine if an entity is included or not.
+	 */
+	public boolean evaluateTemporalQuery(QueryExecutionContext ctx, Entity entity) {
+
+		QueryExecutionContext indexCtx = ctx.withQueryDateAggregator(Optional.empty());
+		indexQueryPlan.init(indexCtx, entity);
+		indexQueryPlan.execute(indexCtx, entity);
+
+		if (!indexQueryPlan.isContained()) {
+			return false;
+		}
+
+		CDateSet indexDates = indexQueryPlan.getDateAggregator().createAggregationResult();
+		final CDateRange[] periods = indexSelector.sample(indexDates);
+		final CDateRange[] indexPeriods = indexMode.convert(periods, indexSelector);
+
+		final boolean[] results = new boolean[indexPeriods.length];
+
+		// First execute sub-query with index's sub-period
+		// to extract compares sub-periods which are then used to evaluate compare for aggregation/inclusion.
+		for (int current = 0; current < indexPeriods.length; current++) {
+			final CDateRange indexPeriod = indexPeriods[current];
+
+			// Execute only event-filter based, to get potential periods for inner, with aggregation.
+			if (!evaluateWithRestriction(entity, indexPeriod, outerCompareQueryPlan, ctx)) {
+				continue;
+			}
+
+			final CDateSet outerDates = outerCompareQueryPlan.getDateAggregator().createAggregationResult();
+			final CDateRange[] comparePeriods = compareSelector.sample(outerDates);
+
+			final boolean[] compareContained = new boolean[comparePeriods.length];
+			final CDateSet[] compareDates = new CDateSet[comparePeriods.length];
+			final Object[][] compareAggregationResults = new Object[comparePeriods.length][];
+
+			for (int inner = 0; inner < comparePeriods.length; inner++) {
+
+				final CDateRange comparePeriod = comparePeriods[inner];
+
+				// Execute compare-query to get actual result
+				compareContained[inner] = evaluateWithRestriction(entity, comparePeriod, innerCompareQueryPlan, ctx);
+
+				if (compareContained[inner]) {
+					compareDates[inner] = innerCompareQueryPlan.getDateAggregator().createAggregationResult();
+					compareAggregationResults[inner] = innerCompareQueryPlan.getAggregators().stream()
+																			.skip(1) // Skip the result-date
+																			.map(Aggregator::createAggregationResult).toArray();
+				}
+			}
+
+			boolean satisfies = compareSelector.satisfies(compareContained);
+
+			log.trace("{}:{} => indexPeriod={}, comparePeriods={}, compareContained={} => {}",
+					  getEntity(),
+					  compareSelector,
+					  indexPeriod,
+					  comparePeriods,
+					  compareContained,
+					  satisfies
+			);
+
+			results[current] = satisfies;
+
+			// If compare's selector is satisfied, we append current to the results and collect the aggregation results
+			if (!satisfies) {
+				continue;
+			}
+
+			indexDateResult.add(periods[current]);
+			addAggregationResults(compareContained, compareDates, compareAggregationResults);
+		}
+
+		boolean satisfies = indexSelector.satisfies(results);
+
+		log.trace("{}:{} => indexPeriods={}, results={} => {}", getEntity(), indexSelector, indexPeriods, results, satisfies);
+
+
+		return satisfies;
+	}
+
+	/**
+	 * Apply date-restriction to QueryContext, and execute Query.
+	 *
+	 * @return if the entity is contained or not.
+	 */
+	private static boolean evaluateWithRestriction(Entity entity, CDateRange partition, ConceptQueryPlan cqp, QueryExecutionContext ctx) {
+		ctx = ctx.withDateRestriction(CDateSet.create(partition))
+				 .withQueryDateAggregator(Optional.empty());
+
+		cqp.init(ctx, entity);
+		cqp.execute(ctx, entity);
+
+		return cqp.isContained();
+	}
+
+	/**
+	 * Collect aggregation results of satisfied innerQueries.
+	 */
+	@SuppressWarnings("unchecked")
+	private void addAggregationResults(boolean[] compareContained, CDateSet[] compareDates, Object[][] compareAggregationResults) {
+		assert compareContained.length == compareDates.length;
+		assert compareContained.length == compareAggregationResults.length;
+
+		for (int index = 0; index < compareContained.length; index++) {
+			if (!compareContained[index]) {
+				continue;
+			}
+
+			compareDateResult.addAll(compareDates[index]);
+			for (int aggIndex = 0; aggIndex < aggregationResults.size(); aggIndex++) {
+
+				aggregationResults.get(aggIndex)
+								  .getValue()
+								  .add(compareAggregationResults[index][aggIndex]);
+			}
+		}
+	}
+
+	@Override
+	public boolean isContained() {
+		return result;
+	}
+
+	@Override
+	public Collection<Aggregator<CDateSet>> getDateAggregators() {
+		return List.of(indexDateAggregator);
 	}
 }

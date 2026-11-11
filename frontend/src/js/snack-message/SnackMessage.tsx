@@ -1,51 +1,48 @@
-import styled from "@emotion/styled";
-import { StateT } from "app-types";
-import React, { useRef, memo, FC } from "react";
-import { useSelector, useDispatch } from "react-redux";
-
+import { XIcon } from "lucide-react";
+import { memo, useRef } from "react";
+import { Button as RacButton } from "react-aria-components";
+import { useTranslation } from "react-i18next";
+import { useDispatch, useSelector } from "react-redux";
+import { tv } from "tailwind-variants";
+import type { StateT } from "../app/reducers";
 import { useClickOutside } from "../common/helpers/useClickOutside";
-import FaIcon from "../icon/FaIcon";
+import { resetMessage as resetMessageAction } from "./actions";
+import type { SnackMessageStateT } from "./reducer";
 
-import { setMessage } from "./actions";
+const root = tv({
+  base: [
+    "fixed right-5 bottom-5",
+    "z-10",
+    "flex items-start",
+    "max-w-[500px]",
+    "rounded-lg",
+    "text-white",
+  ],
+  variants: {
+    success: {
+      true: "bg-primary-500/90",
+      false: "bg-black/75",
+    },
+  },
+});
 
-const Root = styled("div")`
-  position: fixed;
-  z-index: 10;
-  bottom: 20px;
-  right: 20px;
-  background-color: rgba(0, 0, 0, 0.7);
-  color: white;
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  max-width: 500px;
-  border-radius: 5px;
-`;
+const clearZone = tv({
+  base: [
+    "absolute top-3 right-4",
+    "z-11",
+    "opacity-80 hover:opacity-100",
+    "cursor-pointer",
+  ],
+});
 
-const Relative = styled("div")`
-  position: relative;
-  padding: 12px 40px 12px 20px;
-`;
-
-const ClearZone = styled("div")`
-  position: absolute;
-  top: 12px;
-  right: 18px;
-  z-index: 11;
-  cursor: pointer;
-  opacity: 0.8;
-  &:hover {
-    opacity: 1;
-  }
-`;
-
-const SnackMessage: FC = memo(function SnackMessageComponent() {
+export const SnackMessage = memo(function SnackMessageComponent() {
   const ref = useRef(null);
-  const message = useSelector<StateT, string | null>(
-    (state) => state.snackMessage.message,
+  const { message, type } = useSelector<StateT, SnackMessageStateT>(
+    (state) => state.snackMessage,
   );
+  const { t } = useTranslation();
   const dispatch = useDispatch();
-  const resetMessage = () => dispatch(setMessage({ message: null }));
+  const resetMessage = () => dispatch(resetMessageAction());
 
   useClickOutside(ref, () => {
     if (message) {
@@ -56,17 +53,20 @@ const SnackMessage: FC = memo(function SnackMessageComponent() {
   return (
     <div ref={ref}>
       {message && (
-        <Root>
-          <Relative>
-            {message}
-            <ClearZone onClick={resetMessage}>
-              <FaIcon white large icon="times" />
-            </ClearZone>
-          </Relative>
-        </Root>
+        <div className={root({ success: type === "success" })}>
+          <div className="relative py-3 pr-10 pl-5">
+            {/* biome-ignore lint/security/noDangerouslySetInnerHtml: messages are our own i18n text */}
+            <div dangerouslySetInnerHTML={{ __html: message }} />
+            <RacButton
+              aria-label={t("common.close")}
+              className={clearZone()}
+              onPress={resetMessage}
+            >
+              <XIcon className="text-white" />
+            </RacButton>
+          </div>
+        </div>
       )}
     </div>
   );
 });
-
-export default SnackMessage;

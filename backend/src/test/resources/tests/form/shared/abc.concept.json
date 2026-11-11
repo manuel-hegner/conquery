@@ -16,6 +16,11 @@
       "validityDates": {
         "name": "datum",
         "column": "table.datum"
+      },
+      "filters": {
+        "name": "value",
+        "column": "table.column",
+        "type": "SELECT"
       }
     }
   ],
@@ -23,16 +28,16 @@
     {
       "name": "a",
       "condition": {
-        "type": "PREFIX_LIST",
-        "prefixes": "A"
+        "type": "EQUAL",
+        "values": ["A"]
       },
       "children": []
     },
     {
       "name": "b",
       "condition": {
-        "type": "PREFIX_LIST",
-        "prefixes": "B"
+        "type": "EQUAL",
+        "values": ["B"]
       },
       "children": []
     }

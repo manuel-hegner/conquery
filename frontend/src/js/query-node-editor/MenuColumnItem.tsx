@@ -1,77 +1,31 @@
-import styled from "@emotion/styled";
-import React, { FC } from "react";
+import { FunnelIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-import IconButton from "../button/IconButton";
-import { tableHasActiveFilters, tableIsDisabled } from "../model/table";
+import type { NodeResetConfig } from "../model/node";
+import { tableHasFilterValues, tableIsDisabled } from "../model/table";
 import type { TableWithFilterValueT } from "../standard-query-editor/types";
-import WithTooltip from "../tooltip/WithTooltip";
+import { CheckboxField } from "../ui-components/CheckboxField";
+import { GridListItem } from "../ui-components/GridList";
+import { ToggleButton } from "../ui-components/ToggleButton";
+import { Tooltip, TooltipTrigger } from "../ui-components/Tooltip";
+import { C2 } from "../ui-components/Typography";
 
-const Container = styled("div")<{ disabled?: boolean }>`
-  font-size: ${({ theme }) => theme.font.md};
-  line-height: 21px;
-  padding: 8px 15px;
-  font-weight: 700;
-  color: ${({ theme, disabled }) =>
-    disabled ? theme.col.gray : theme.col.black};
-  width: 100%;
-  text-align: left;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  background-color: transparent;
-  cursor: pointer;
-
-  &:hover {
-    text-decoration: underline;
-  }
-`;
-
-const SxWithTooltip = styled(WithTooltip)`
-  display: flex !important;
-`;
-
-const SxIconButton = styled(IconButton)`
-  font-size: ${({ theme }) => theme.font.lg};
-  line-height: ${({ theme }) => theme.font.lg};
-  padding: 0;
-
-  svg {
-    font-size: ${({ theme }) => theme.font.lg};
-    line-height: ${({ theme }) => theme.font.lg};
-  }
-`;
-
-const Label = styled("span")`
-  padding-left: 10px;
-  line-height: ${({ theme }) => theme.font.lg};
-`;
-
-const Row = styled("div")`
-  display: flex;
-  align-items: center;
-`;
-
-interface PropsT {
-  table: TableWithFilterValueT;
-  isActive: boolean;
-  isOnlyOneTableIncluded: boolean;
-  blocklistedTables?: string[];
-  allowlistedTables?: string[];
-  onClick: () => void;
-  onToggleTable: (value: boolean) => void;
-  onResetTable: () => void;
-}
-
-const MenuColumnItem: FC<PropsT> = ({
+/** a source in the navigation: include it, go to its section, clear its filters */
+const MenuColumnItem = ({
+  id,
   table,
   isOnlyOneTableIncluded,
   blocklistedTables,
   allowlistedTables,
-  onClick,
   onToggleTable,
   onResetTable,
+}: {
+  id: string;
+  table: TableWithFilterValueT;
+  isOnlyOneTableIncluded: boolean;
+  blocklistedTables?: string[];
+  allowlistedTables?: string[];
+  onToggleTable: (isExcluded: boolean) => void;
+  onResetTable: (config: NodeResetConfig) => void;
 }) => {
   const { t } = useTranslation();
   const isDisabled = tableIsDisabled(
@@ -83,49 +37,40 @@ const MenuColumnItem: FC<PropsT> = ({
   const includable = table.exclude;
   const excludable = !isOnlyOneTableIncluded;
 
-  const isFilterActive = tableHasActiveFilters(table);
+  const isFilterActive = tableHasFilterValues(table);
 
   return (
-    <Container disabled={isDisabled} onClick={onClick}>
-      <Row>
-        <SxIconButton
-          regular
-          icon={includable ? "square" : "check-square"}
-          disabled={isDisabled || (!includable && !excludable)}
-          onClick={(event) => {
-            // To prevent selecting the table as well, see above
-            event.stopPropagation();
-
-            if (isDisabled) {
-              return;
-            }
-
-            if (includable || excludable) {
-              onToggleTable(!table.exclude);
-            }
-          }}
-        />
-        <Label>{table.label}</Label>
-      </Row>
-      {isFilterActive && (
-        <SxWithTooltip text={t("queryNodeEditor.resetSettings")}>
-          <SxIconButton
-            active
-            icon="filter"
-            onClick={(event) => {
-              // To prevent selecting the table as well, see above
-              event.stopPropagation();
-
-              if (isDisabled) {
-                return;
-              }
-
-              onResetTable();
-            }}
-          />
-        </SxWithTooltip>
-      )}
-    </Container>
+    <GridListItem id={id} textValue={table.label}>
+      <CheckboxField
+        aria-label={t("queryNodeEditor.includeTable", { table: table.label })}
+        isSelected={!table.exclude}
+        isDisabled={isDisabled || (!includable && !excludable)}
+        onChange={(include) => onToggleTable(!include)}
+      />
+      <div className="min-w-0 grow">
+        <C2 truncate tone={isDisabled || table.exclude ? "muted" : undefined}>
+          {table.label}
+        </C2>
+      </div>
+      {/* a fixed slot, so the row keeps its layout without the button */}
+      <span className="flex size-6 shrink-0 items-center justify-center">
+        {isFilterActive && (
+          <TooltipTrigger>
+            <ToggleButton
+              aria-label={t("queryNodeEditor.clearSettings")}
+              intent="tertiary"
+              size="sm"
+              isSelected
+              isDisabled={isDisabled}
+              onChange={() => onResetTable({ useDefaults: false })}
+            >
+              <FunnelIcon />
+            </ToggleButton>
+            <Tooltip>{t("queryNodeEditor.clearSettings")}</Tooltip>
+          </TooltipTrigger>
+        )}
+      </span>
+    </GridListItem>
   );
 };
 

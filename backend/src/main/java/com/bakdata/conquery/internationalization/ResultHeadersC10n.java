@@ -4,7 +4,7 @@ import c10n.annotations.De;
 import c10n.annotations.En;
 
 public interface ResultHeadersC10n {
-	
+
 	@En("resolution")
 	@De("Zeiteinheit")
 	String resolution();
@@ -17,11 +17,10 @@ public interface ResultHeadersC10n {
 	@De("Datumswerte")
 	String dates();
 
-	@En("event_duration")
-	@De("Anzahl relevanter Tage")
-	String eventDuration();
+	@En("source")
+	@De("Quelle")
+	String source();
 
-	
 	@En("event_date")
 	@De("Indexdatum")
 	String eventDate();
@@ -29,14 +28,26 @@ public interface ResultHeadersC10n {
 	@En("index")
 	@De("Index Zeiteinheit")
 	String index();
-	
+
+	@En("scope")
+	@De("Bereich")
+	String observationScope();
+
 	@En("feature_date_range")
 	@De("Vorbeobachtungszeitraum")
 	String featureDateRange();
-	
+
 	@En("outcome_date_range")
 	@De("Nachbeobachtungszeitraum")
 	String outcomeDateRange();
+
+	@En("{0} others")
+	@De("{0} andere")
+	String others(long count);
+
+	@En("{0} - Compare Dates")
+	@De("{0} - Vergleichszeitraum")
+	String temporalCompareLabel(String indexName);
 
 
 }

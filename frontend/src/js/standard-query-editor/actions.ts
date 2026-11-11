@@ -1,29 +1,32 @@
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useDispatch } from "react-redux";
-import { ActionType, createAction, createAsyncAction } from "typesafe-actions";
+import { type ActionType, createAction } from "typesafe-actions";
 
 import {
-  PostPrefixForSuggestionsParams,
+  type PostPrefixForSuggestionsParams,
+  usePostFilterValuesResolve,
   usePostPrefixForSuggestions,
 } from "../api/api";
 import type {
   AndQueryT,
   ConceptIdT,
-  DatasetIdT,
-  QueryT,
-  QueryNodeT,
   PostFilterSuggestionsResponseT,
+  QueryNodeT,
+  QueryT,
+  SelectOptionT,
 } from "../api/types";
-import { ErrorObject, errorPayload, successPayload } from "../common/actions";
+import { successPayload } from "../common/actions/genericActions";
 import type { TreesT } from "../concept-trees/reducer";
+import { type NodeResetConfig, nodeIsConceptQueryNode } from "../model/node";
 import { useLoadQuery } from "../previous-queries/list/actions";
-import type { ModeT } from "../ui-components/InputRange";
 
-import { StandardQueryStateT } from "./queryReducer";
+import { expandNode } from "./expandNode";
+import type { StandardQueryStateT } from "./queryReducer";
 import type {
   DragItemConceptTreeNode,
-  DragItemNode,
   DragItemQuery,
+  FilterWithValueType,
 } from "./types";
 
 export type StandardQueryEditorActions = ActionType<
@@ -40,24 +43,23 @@ export type StandardQueryEditorActions = ActionType<
   | typeof toggleExcludeGroup
   | typeof toggleSecondaryIdExclude
   | typeof toggleTimestamps
-  | typeof resetAllFilters
+  | typeof resetAllSettings
   | typeof removeConceptFromNode
   | typeof addConceptToNode
-  | typeof switchFilterMode
   | typeof setSelects
   | typeof setTableSelects
   | typeof setDateColumn
   | typeof setSelectedSecondaryId
   | typeof expandPreviousQuery
-  | typeof loadFilterSuggestions
+  | typeof loadFilterSuggestionsSuccess
 >;
 
 export const dropAndNode = createAction("query-editor/DROP_AND_NODE")<{
-  item: DragItemConceptTreeNode | DragItemQuery | DragItemNode;
+  item: DragItemConceptTreeNode | DragItemQuery;
 }>();
 
 export const dropOrNode = createAction("query-editor/DROP_OR_NODE")<{
-  item: DragItemConceptTreeNode | DragItemQuery | DragItemNode;
+  item: DragItemConceptTreeNode | DragItemQuery;
   andIdx: number;
 }>();
 
@@ -91,22 +93,97 @@ const findPreviousQueryIds = (node: QueryNodeT, queries = []): string[] => {
     case "OR":
       return [
         ...queries,
-        ...node.children.flatMap((child: any) =>
-          findPreviousQueryIds(child, []),
-        ),
+        ...node.children.flatMap((child) => findPreviousQueryIds(child, [])),
       ];
     default:
       return queries;
   }
 };
 
-export const expandPreviousQuery = createAction(
-  "query-editor/EXPAND_PREVIOUS_QUERY",
-)<{
+// Completely override all groups in the editor with the previous groups, but
+// a) merge elements with concept data from concept trees (esp. "tables")
+// b) load nested previous queries contained in that query,
+//    so they can also be expanded
+const createExpandedQueryState = ({
+  rootConcepts,
+  query,
+  expandErrorMessage,
+}: {
   rootConcepts: TreesT;
   query: AndQueryT;
   expandErrorMessage: string;
-}>();
+}): StandardQueryStateT => {
+  return query.root.children.map((child) =>
+    expandNode(rootConcepts, child, expandErrorMessage),
+  );
+};
+
+export const expandPreviousQuery = createAction(
+  "query-editor/EXPAND_PREVIOUS_QUERY",
+)<StandardQueryStateT>();
+
+const useLoadBigMultiSelectValues = () => {
+  const postFilterValuesResolve = usePostFilterValuesResolve();
+
+  return useCallback(
+    // Actually, state is a StandardQueryStateT
+    // where all big multi select filters
+    // don't have value: SelectOptionT[] yet, but string[]
+    // we just don't have an extra type for it.
+    async (state: StandardQueryStateT): Promise<StandardQueryStateT> => {
+      return Promise.all(
+        state.map(async (val) => ({
+          ...val,
+          elements: await Promise.all(
+            val.elements.map(async (el) => {
+              if (!nodeIsConceptQueryNode(el)) return el;
+              return {
+                ...el,
+                tables: await Promise.all(
+                  el.tables.map(async (table) => ({
+                    ...table,
+                    filters: await Promise.all(
+                      table.filters.map(async (filter) => {
+                        if (
+                          filter.type !== "BIG_MULTI_SELECT" ||
+                          !filter.value ||
+                          filter.value.length === 0
+                        ) {
+                          return filter;
+                        }
+
+                        try {
+                          const result = await postFilterValuesResolve(
+                            filter.id,
+                            filter.value as unknown as string[], // See explanation above
+                          );
+                          return {
+                            ...filter,
+                            value: [
+                              ...(result.resolvedFilter?.value || []),
+                              ...(result.unknownCodes || []).map((code) => ({
+                                label: code,
+                                value: code,
+                              })),
+                            ],
+                          };
+                        } catch (e) {
+                          console.error(e);
+                          return { ...filter, value: [] };
+                        }
+                      }),
+                    ),
+                  })),
+                ),
+              };
+            }),
+          ),
+        })),
+      );
+    },
+    [postFilterValuesResolve],
+  );
+};
 
 const isAndQuery = (query: QueryT): query is AndQueryT => {
   return query.root.type === "AND";
@@ -117,34 +194,40 @@ const isAndQuery = (query: QueryT): query is AndQueryT => {
 */
 export const useExpandPreviousQuery = () => {
   const dispatch = useDispatch();
-  const loadQuery = useLoadQuery();
+  const { loadQuery } = useLoadQuery();
   const { t } = useTranslation();
+  const loadBigMultiSelectValues = useLoadBigMultiSelectValues();
 
-  return async (datasetId: DatasetIdT, rootConcepts: TreesT, query: QueryT) => {
-    if (!isAndQuery(query)) {
-      throw new Error("Cant expand query, because root is not AND");
-    }
+  return useCallback(
+    async (rootConcepts: TreesT, query: QueryT) => {
+      if (!isAndQuery(query)) {
+        throw new Error("Cant expand query, because root is not AND");
+      }
 
-    const nestedPreviousQueryIds = findPreviousQueryIds(query.root);
+      const nestedPreviousQueryIds = findPreviousQueryIds(query.root);
 
-    dispatch(
-      expandPreviousQuery({
-        rootConcepts,
-        query,
-        expandErrorMessage: t("queryEditor.couldNotExpandNode"),
-      }),
-    );
+      const expandedQueryState = await loadBigMultiSelectValues(
+        createExpandedQueryState({
+          rootConcepts,
+          query,
+          expandErrorMessage: t("queryEditor.couldNotExpandNode"),
+        }),
+      );
 
-    await Promise.all(
-      nestedPreviousQueryIds.map((queryId) => loadQuery(datasetId, queryId)),
-    );
+      dispatch(expandPreviousQuery(expandedQueryState));
 
-    dispatch(
-      setSelectedSecondaryId({
-        secondaryId: query.secondaryId ? query.secondaryId : null,
-      }),
-    );
-  };
+      await Promise.all(
+        nestedPreviousQueryIds.map((queryId) => loadQuery(queryId)),
+      );
+
+      dispatch(
+        setSelectedSecondaryId({
+          secondaryId: query.secondaryId ? query.secondaryId : null,
+        }),
+      );
+    },
+    [dispatch, t, loadQuery, loadBigMultiSelectValues],
+  );
 };
 
 export const updateNodeLabel = createAction("query-editor/UPDATE_NODE_LABEL")<{
@@ -177,46 +260,40 @@ export const setFilterValue = createAction("query-editor/SET_FILTER_VALUE")<{
   orIdx: number;
   tableIdx: number;
   filterIdx: number;
-  value: unknown;
+  value: FilterWithValueType["value"]; // Actually: FilterWithValueType["value"] which is overloaded;
 }>();
 
 export const setTableSelects = createAction("query-editor/SET_TABLE_SELECTS")<{
   andIdx: number;
   orIdx: number;
   tableIdx: number;
-  value: unknown;
+  value: SelectOptionT[];
 }>();
 export const setSelects = createAction("query-editor/SET_SELECTS")<{
   andIdx: number;
   orIdx: number;
-  value: unknown;
+  value: SelectOptionT[];
 }>();
 export const setDateColumn = createAction("query-editor/SET_DATE_COLUMN")<{
   andIdx: number;
   orIdx: number;
   tableIdx: number;
-  value: unknown;
+  value: string;
 }>();
 
-export const resetAllFilters = createAction("query-editor/RESET_ALL_FILTERS")<{
+export const resetAllSettings = createAction(
+  "query-editor/RESET_ALL_SETTINGS",
+)<{
   andIdx: number;
   orIdx: number;
+  config: NodeResetConfig;
 }>();
 
 export const resetTable = createAction("query-editor/RESET_TABLE")<{
   andIdx: number;
   orIdx: number;
   tableIdx: number;
-}>();
-
-export const switchFilterMode = createAction(
-  "query-editor/SWITCH_FILTER_MODE",
-)<{
-  andIdx: number;
-  orIdx: number;
-  tableIdx: number;
-  filterIdx: number;
-  mode: ModeT;
+  config: NodeResetConfig;
 }>();
 
 export const toggleTimestamps = createAction("query-editor/TOGGLE_TIMESTAMPS")<{
@@ -233,17 +310,14 @@ interface FilterContext {
   orIdx: number;
   tableIdx: number;
   filterIdx: number;
+  page: number;
 }
-export const loadFilterSuggestions = createAsyncAction(
-  "query-editor/LOAD_FILTER_SUGGESTIONS_START",
+export const loadFilterSuggestionsSuccess = createAction(
   "query-editor/LOAD_FILTER_SUGGESTIONS_SUCCESS",
-  "query-editor/LOAD_FILTER_SUGGESTIONS_ERROR",
 )<
-  FilterContext,
   FilterContext & {
     data: PostFilterSuggestionsResponseT;
-  },
-  FilterContext & ErrorObject
+  }
 >();
 
 export const useLoadFilterSuggestions = (
@@ -252,23 +326,29 @@ export const useLoadFilterSuggestions = (
   const dispatch = useDispatch();
   const postPrefixForSuggestions = usePostPrefixForSuggestions();
 
-  return (
-    params: PostPrefixForSuggestionsParams,
-    tableIdx: number,
-    filterIdx: number,
-  ) => {
-    if (!editedNode) return;
+  return useCallback(
+    async (
+      params: PostPrefixForSuggestionsParams,
+      tableIdx: number,
+      filterIdx: number,
+      { returnOnly }: { returnOnly?: boolean } = {},
+    ) => {
+      if (!editedNode) return null;
 
-    const context = { ...editedNode, tableIdx, filterIdx };
+      const context = { ...editedNode, tableIdx, filterIdx, page: params.page };
 
-    dispatch(loadFilterSuggestions.request(context));
+      const suggestions = await postPrefixForSuggestions(params);
 
-    return postPrefixForSuggestions(params).then(
-      (r) =>
-        dispatch(loadFilterSuggestions.success(successPayload(r, context))),
-      (e) => dispatch(loadFilterSuggestions.failure(errorPayload(e, context))),
-    );
-  };
+      if (!returnOnly) {
+        dispatch(
+          loadFilterSuggestionsSuccess(successPayload(suggestions, context)),
+        );
+      }
+
+      return suggestions;
+    },
+    [dispatch, editedNode, postPrefixForSuggestions],
+  );
 };
 
 export const setSelectedSecondaryId = createAction(

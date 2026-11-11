@@ -3,10 +3,15 @@ const localStorage: Storage = window.localStorage;
 
 interface UserSettings {
   arePreviousQueriesFoldersOpen: boolean;
+  preferredDownloadEnding?: string; // Usually CSV or XLSX
+  preferredDownloadLabel?: string; // Label of the preferred Download format (e.g. "All files")
+  readNewsIds?: Record<string, string[]>; // per user name
 }
 
 const initialState: UserSettings = {
   arePreviousQueriesFoldersOpen: false,
+  preferredDownloadEnding: undefined,
+  preferredDownloadLabel: undefined,
 };
 
 export const getUserSettings = (): UserSettings => {
@@ -24,8 +29,4 @@ export const storeUserSettings = (
     "userSettings",
     JSON.stringify({ ...settings, ...nextSettings }),
   );
-};
-
-export const deleteUserSettings = (): void => {
-  localStorage.removeItem("userSettings");
 };

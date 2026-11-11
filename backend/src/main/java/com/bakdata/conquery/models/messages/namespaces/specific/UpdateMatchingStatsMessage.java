@@ -1,140 +1,242 @@
 package com.bakdata.conquery.models.messages.namespaces.specific;
 
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.bakdata.conquery.io.cps.CPSType;
+import com.bakdata.conquery.models.common.daterange.CDateRange;
+import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.datasets.concepts.Concept;
 import com.bakdata.conquery.models.datasets.concepts.ConceptElement;
 import com.bakdata.conquery.models.datasets.concepts.Connector;
 import com.bakdata.conquery.models.datasets.concepts.MatchingStats;
-import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeNode;
 import com.bakdata.conquery.models.datasets.concepts.tree.TreeConcept;
 import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.CBlock;
+import com.bakdata.conquery.models.identifiable.ids.specific.CBlockId;
+import com.bakdata.conquery.models.identifiable.ids.specific.ConceptElementId;
+import com.bakdata.conquery.models.identifiable.ids.specific.ConceptId;
+import com.bakdata.conquery.models.jobs.Job;
 import com.bakdata.conquery.models.messages.namespaces.NamespacedMessage;
 import com.bakdata.conquery.models.messages.namespaces.WorkerMessage;
 import com.bakdata.conquery.models.worker.Worker;
+import com.bakdata.conquery.util.progressreporter.ProgressReporter;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.google.common.base.Functions;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
+import org.apache.mina.core.future.WriteFuture;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * For each {@link com.bakdata.conquery.models.query.queryplan.specific.ConceptNode} calculate the number of matching events and the span of date-ranges.
  */
 @CPSType(id = "UPDATE_MATCHING_STATS", base = NamespacedMessage.class)
 @Slf4j
-public class UpdateMatchingStatsMessage extends WorkerMessage.Slow {
+@RequiredArgsConstructor(onConstructor_ = {@JsonCreator})
+@EqualsAndHashCode(callSuper = false)
+public class UpdateMatchingStatsMessage extends WorkerMessage {
+
+	@Getter
+	private final Collection<ConceptId> concepts;
+
+	@Nullable
+	private static CDateRange spannedValidityDates(Bucket bucket, int event, Iterable<Column> dateColumns) {
+		int maxDate = Integer.MIN_VALUE;
+		int minDate = Integer.MAX_VALUE;
+
+		for (Column c : dateColumns) {
+
+			if (!bucket.has(event, c)) {
+				continue;
+			}
+
+			final CDateRange time = bucket.getAsDateRange(event, c);
+
+			if (time.hasUpperBound()) {
+				maxDate = Math.max(time.getMaxValue(), maxDate);
+			}
+
+			if (time.hasLowerBound()) {
+				minDate = Math.min(time.getMinValue(), minDate);
+			}
+		}
+
+		final CDateRange span;
+
+		if (minDate == Integer.MAX_VALUE && maxDate == Integer.MIN_VALUE) {
+			span = null;
+		}
+		else if (minDate == Integer.MAX_VALUE) {
+			span = CDateRange.atMost(maxDate);
+		}
+		else if (maxDate == Integer.MIN_VALUE) {
+			span = CDateRange.atLeast(minDate);
+		}
+		else {
+			span = CDateRange.of(minDate, maxDate);
+		}
+		return span;
+	}
 
 
-    @Override
-    public void react(Worker worker) throws Exception {
-        if (worker.getStorage().getAllCBlocks().isEmpty()) {
-            log.debug("Worker {} is empty, skipping.", worker);
-            getProgressReporter().done();
-            return;
-        }
+	@Override
+	public void react(Worker worker) throws Exception {
+		worker.getJobManager().addSlowJob(new UpdateMatchingStatsJob(worker, concepts));
+	}
 
-        getProgressReporter().setMax(worker.getStorage().getAllConcepts().size());
+	@RequiredArgsConstructor
+	private static class UpdateMatchingStatsJob extends Job {
+		private final Worker worker;
+		private final Collection<ConceptId> concepts;
 
-        log.info("BEGIN update Matching stats for {} Concepts", worker.getStorage().getAllConcepts().size());
+		@Override
+		public void execute() throws Exception {
+			try(Stream<CBlock> allCBlocks = worker.getStorage().getAllCBlocks()) {
+				if (allCBlocks.findAny().isEmpty()) {
+					log.debug("Worker {} is empty, skipping.", worker);
+					return;
+				}
+			}
 
-        // SubJobs collect into this Map.
-        final ConcurrentMap<ConceptElement<?>, MatchingStats.Entry> messages =
-                new ConcurrentHashMap<>(worker.getStorage().getAllConcepts().size()
-                        * 5_000); // Just a guess-timate so we don't grow that often, this memory is very short lived so we can over commit.
+			final ProgressReporter progressReporter = getProgressReporter();
+			progressReporter.setMax(concepts.size());
 
+			log.info("BEGIN update Matching stats for {} Concepts", concepts.size());
 
-        // TODO FK: If this causes issues with memory, use a LoadingCache with SoftReferences instead
-        ConcurrentMap<Bucket, int[]> eventEntitiesCache = new ConcurrentHashMap<>();
+			final Map<? extends ConceptId, CompletableFuture<Void>>
+					subJobs =
+					concepts.stream()
+							.collect(Collectors.toMap(Functions.identity(),
+													  conceptId -> CompletableFuture.runAsync(() -> {
 
+														  Map<ConceptElementId<?>, MatchingStats.Entry> matchingStats = calculateConceptMatches(conceptId, worker);
 
+														  final WriteFuture writeFuture = worker.send(new UpdateElementMatchingStats(worker.getInfo().getId(), matchingStats));
 
-        List<CompletableFuture<?>> subJobs =
-                worker.getStorage().getAllConcepts()
-                        .stream()
-                        .map(concept -> CompletableFuture.runAsync(() -> calculateConceptMatches(concept, messages, worker, eventEntitiesCache), worker.getExecutorService()))
-                        .collect(Collectors.toList());
-
-        log.debug("All jobs submitted. Waiting for completion.");
-
-        CompletableFuture.allOf(subJobs.toArray(CompletableFuture[]::new)).join();
-
-        log.debug("All threads are done.");
-
-        if (messages.isEmpty()) {
-            log.warn("Results were empty.");
-        } else {
-            worker.send(new UpdateElementMatchingStats(worker.getInfo().getId(), messages));
-        }
-
-        getProgressReporter().done();
-    }
-
-    public void calculateConceptMatches(Concept<?> concept, Map<ConceptElement<?>, MatchingStats.Entry> results, Worker worker, ConcurrentMap<Bucket, int[]> eventEntitiesCache) {
-
-        for (CBlock cBlock : worker.getStorage().getAllCBlocks()) {
-
-            if (!cBlock.getConnector().getConcept().equals(concept)) {
-                continue;
-            }
-
-            try {
-                Bucket bucket = cBlock.getBucket();
-                Table table = bucket.getTable();
-
-                final int[] entitiesPerEvent = eventEntitiesCache.computeIfAbsent(bucket, this::getEntitiesPerEvent);
-
-                for (int event = 0; event < bucket.getNumberOfEvents(); event++) {
-
-                    final int[] localIds = cBlock.getEventMostSpecificChild(event);
-
-                    final int entity = entitiesPerEvent[event];
-
-                    if (!(concept instanceof TreeConcept) || localIds == null) {
-
-                        results.computeIfAbsent(concept, (ignored) -> new MatchingStats.Entry())
-                                .addEvent(table, bucket, event, entity);
-
-                        continue;
-                    }
-
-                    if (Connector.isNotContained(localIds)) {
-                        continue;
-                    }
-
-                    ConceptTreeNode<?> element = ((TreeConcept) concept).getElementByLocalId(localIds);
-
-                    while (element != null) {
-                        results.computeIfAbsent(((ConceptElement<?>) element), (ignored) -> new MatchingStats.Entry())
-                                .addEvent(table, bucket, event, entity);
-                        element = element.getParent();
-                    }
-                }
-            } catch (Exception e) {
-                log.error("Failed to collect the matching stats for {}", cBlock, e);
-            }
-        }
-
-        getProgressReporter().report(1);
-    }
-
-    @NotNull
-    private int[] getEntitiesPerEvent(Bucket bucket) {
-        final int[] entitiesPerEvent = new int[bucket.getNumberOfEvents()];
+														  progressReporter.report(1);
+													  }, worker.getJobsExecutorService())
+							));
 
 
-        for (Integer entity : bucket.getEntities()) {
-            final int to = bucket.getEntityEnd(entity);
+			log.debug("All jobs submitted. Waiting for completion.");
 
-            for (int index = bucket.getEntityStart(entity); index < to; index++) {
-                entitiesPerEvent[index] = entity;
-            }
-        }
-        return entitiesPerEvent;
-    }
+
+			final CompletableFuture<Void> all = CompletableFuture.allOf(subJobs.values().toArray(CompletableFuture[]::new));
+
+			do {
+				try {
+					all.get(1, TimeUnit.MINUTES);
+				}
+				catch (TimeoutException exception) {
+					// Count unfinished matching stats jobs.
+					if (log.isDebugEnabled()) {
+						final long unfinished = subJobs.values().stream().filter(Predicate.not(CompletableFuture::isDone)).count();
+						log.debug("{} still waiting for {} tasks", worker.getInfo().getDataset(), unfinished);
+					}
+
+					// When trace, also log the unfinished jobs.
+					if (log.isTraceEnabled()) {
+						subJobs.forEach((concept, future) -> {
+							if (future.isDone()) {
+								return;
+							}
+
+							log.trace("Still waiting for `{}`", concept);
+
+						});
+					}
+				}
+			} while (!all.isDone());
+
+			log.debug("DONE collecting matching stats for {}", worker.getInfo().getDataset());
+
+		}
+
+		@Override
+		public String getLabel() {
+			return String.format("Calculate Matching Stats for %s", worker.getInfo().getDataset());
+		}
+
+		private static Map<ConceptElementId<?>, MatchingStats.Entry> calculateConceptMatches(ConceptId conceptId, Worker worker) {
+
+			Concept<?> concept = conceptId.resolve();
+
+			final Map<ConceptElementId<?>, MatchingStats.Accumulator> matchingStats = new HashMap<>(concept.countElements());
+
+			log.debug("BEGIN calculating for `{}`", conceptId);
+
+			try (Stream<CBlockId> allCBlocks = worker.getStorage().getAllCBlockIds()) {
+
+				for (CBlockId cBlockId : allCBlocks.toList()) {
+
+					if (!cBlockId.getConnector().getConcept().equals(conceptId)) {
+						continue;
+					}
+
+					try {
+						CBlock cBlock = cBlockId.resolve();
+						final Bucket bucket = cBlock.getBucket().resolve();
+						final Table table = bucket.getTable().resolve();
+						final List<Column> dateColumns = Arrays.stream(table.getColumns()).filter(t -> t.getType().isDateCompatible()).toList();
+
+						for (String entity : bucket.entities()) {
+							final long hashedEntity = MatchingStats.Accumulator.hashEntity(entity);
+
+							final int entityEnd = bucket.getEntityEnd(entity);
+
+							for (int event = bucket.getEntityStart(entity); event < entityEnd; event++) {
+
+								final int[] localIds = cBlock.getPathToMostSpecificChild(event);
+								final CDateRange span = spannedValidityDates(bucket, event, dateColumns);
+
+								if (!(concept instanceof TreeConcept) || localIds == null) {
+									final MatchingStats.Accumulator accumulator = matchingStats.computeIfAbsent(conceptId, (ignored) -> new MatchingStats.Accumulator());
+									accumulator
+											 .addEvents(hashedEntity, 1, span);
+									continue;
+								}
+
+								if (Connector.isNotContained(localIds)) {
+									continue;
+								}
+
+								ConceptElement<?> element = ((TreeConcept) concept).getElementByLocalIdPath(localIds);
+
+								while (element != null) {
+									final MatchingStats.Accumulator accumulator = matchingStats.computeIfAbsent(element.getId(), (ignored) -> new MatchingStats.Accumulator());
+									accumulator
+											 .addEvents(hashedEntity, 1, span);
+									element = element.getParent();
+								}
+							}
+						}
+
+					}
+					catch (Exception e) {
+						log.error("Failed to collect the matching stats for {}", cBlockId, e);
+					}
+				}
+			}
+
+			log.trace("DONE calculating for `{}`", conceptId);
+
+			Map<ConceptElementId<?>, MatchingStats.Entry> entries = new HashMap<>(matchingStats.size());
+			matchingStats.forEach((element, accumulator) -> entries.put(element, accumulator.toEntry()));
+			return entries;
+		}
+
+	}
 }

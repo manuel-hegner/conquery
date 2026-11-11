@@ -1,0 +1,96 @@
+import { RotateCcwIcon } from "lucide-react";
+import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import type { DateRangeT } from "../../api/types";
+import type { DateStringMinMax } from "../../common/helpers/dateHelper";
+import { Button } from "../../ui-components/Button";
+import { CheckboxField } from "../../ui-components/CheckboxField";
+import { DateRangeField } from "../../ui-components/DateRangeField";
+import {
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+} from "../../ui-components/Modal";
+
+export const DateModal = ({
+  onClose,
+  dateRange = {},
+  headline,
+  excludeFromDates,
+  setExcludeFromDates,
+  setDateRange,
+  onResetDates,
+}: {
+  onClose: () => void;
+  excludeFromDates?: boolean;
+  setExcludeFromDates: (exclude: boolean) => void;
+  dateRange?: DateRangeT;
+  setDateRange: (range: DateRangeT) => void;
+  headline: string;
+  onResetDates: () => void;
+}) => {
+  const { t } = useTranslation();
+
+  const minDate = dateRange ? dateRange.min || null : null;
+  const maxDate = dateRange ? dateRange.max || null : null;
+  const hasActiveDate = !!(minDate || maxDate);
+
+  const labelSuffix = useMemo(() => {
+    return hasActiveDate ? (
+      <span className="ml-5">
+        <Button intent="tertiary" size="sm" onPress={onResetDates}>
+          <RotateCcwIcon />
+          {t("queryNodeEditor.reset")}
+        </Button>
+      </span>
+    ) : null;
+  }, [t, hasActiveDate, onResetDates]);
+
+  const onChange = useCallback(
+    (date: DateStringMinMax) => {
+      if (!date.min && !date.max) return;
+
+      setDateRange({
+        min: date.min || undefined,
+        max: date.max || undefined,
+      });
+    },
+    [setDateRange],
+  );
+
+  return (
+    <Modal
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) onClose();
+      }}
+    >
+      <ModalHeader>{t("queryGroupModal.explanation")}</ModalHeader>
+      <ModalBody>
+        <div className="flex flex-col gap-8">
+          <div>{headline}</div>
+          <DateRangeField
+            autoFocus
+            label={t("queryGroupModal.dateRange")}
+            labelSuffix={labelSuffix}
+            onChange={onChange}
+            value={{
+              min: minDate,
+              max: maxDate,
+            }}
+          />
+          <CheckboxField
+            isSelected={excludeFromDates}
+            onChange={setExcludeFromDates}
+          >
+            {t("queryNodeEditor.excludeTimestamps")}
+          </CheckboxField>
+        </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button slot="close">{t("common.done")}</Button>
+      </ModalFooter>
+    </Modal>
+  );
+};

@@ -1,6 +1,6 @@
 package com.bakdata.conquery.apiv1.auth;
 
-import javax.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotEmpty;
 
 import com.bakdata.conquery.models.auth.basic.LocalAuthenticationRealm;
 import com.bakdata.conquery.models.identifiable.ids.specific.UserId;
@@ -17,5 +17,5 @@ public class UsernamePasswordToken {
 	@NotEmpty
 	private String user;
 	@NotEmpty
-	private char[] password;
+	private String password;
 }

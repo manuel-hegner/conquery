@@ -8,38 +8,37 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Stream;
+import jakarta.validation.Valid;
 
-import javax.validation.Valid;
-
-import com.bakdata.conquery.models.identifiable.ids.IId;
+import com.bakdata.conquery.models.identifiable.ids.Id;
 import com.google.common.collect.ForwardingMap;
 
 /**
  * A typesafe mapping for the ID-system that does not allow a remapping of an existing key.
- * 
+ *
  * @implNote implementation of {@link Iterable} is dropped, because hibernate could not decide on how to validate this map (either with an map-extractor or an iterable-extractor).
  */
-public class IdMap<ID extends IId<? super V>, V extends Identifiable<? extends ID>> extends ForwardingMap <ID,V> {
+public class IdMap<ID extends Id, V extends Identifiable<? extends ID, ?>> extends ForwardingMap<ID, V> {
 
 	@Valid
 	private final ConcurrentMap<ID, V> map;
-	
+
 	public IdMap() {
 		map = new ConcurrentHashMap<ID, V>();
 	}
-	
+
 	public IdMap(Collection<V> collection) {
 		map = new ConcurrentHashMap<>();
 		for(V value : collection) {
 			map.put(value.getId(), value);
 		}
 	}
-	
+
 	@Override
 	public Set<Map.Entry <ID, V>> entrySet(){
 		return map.entrySet();
 	}
-	
+
 	@Override
 	public Collection<V> values() {
 		return map.values();
@@ -48,10 +47,10 @@ public class IdMap<ID extends IId<? super V>, V extends Identifiable<? extends I
 	public Stream<V> stream() {
 		return map.values().stream();
 	}
-	
+
 	@Override
 	public int size() {
-		return map.values().size();
+		return map.size();
 	}
 
 	public V getOrFail(ID id) {
@@ -73,26 +72,26 @@ public class IdMap<ID extends IId<? super V>, V extends Identifiable<? extends I
 	public Optional<V> getOptional(ID id) {
 		return Optional.ofNullable(map.get(id));
 	}
-	
+
 	public boolean add(V entry) {
 		addToMap(entry);
 		return true;
 	}
-	
+
 	public V update(V entry) {
-		return map.put((ID)entry.getId(), entry);
+		return map.put(entry.getId(), entry);
 	}
-	
+
 	public V remove(ID id) {
 		V obj = map.remove(id);
 		return obj;
 	}
-	
+
 	@Override @Deprecated
 	public V remove(Object object) {
 		return super.remove(object);
 	}
-	
+
 	@Override @Deprecated
 	public V put(ID key, V value) {
 		return super.put(key, value);

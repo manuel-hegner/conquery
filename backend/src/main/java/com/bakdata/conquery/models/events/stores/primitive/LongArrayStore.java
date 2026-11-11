@@ -1,6 +1,7 @@
 package com.bakdata.conquery.models.events.stores.primitive;
 
 import com.bakdata.conquery.io.cps.CPSType;
+import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.stores.root.ColumnStore;
 import com.bakdata.conquery.models.events.stores.root.IntegerStore;
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -21,6 +22,7 @@ public class LongArrayStore implements IntegerStore {
 	private final long[] values;
 
 	@Override
+	@ToString.Include
 	public int getLines() {
 		return values.length;
 	}
@@ -44,6 +46,10 @@ public class LongArrayStore implements IntegerStore {
 		return new LongArrayStore(ColumnStore.selectArray(starts, ends, values, long[]::new), nullValue);
 	}
 
+	@Override
+	public LongArrayStore createDescription() {
+		return ColumnStore.emptyCopy(this);
+	}
 
 	@Override
 	public void setNull(int event) {
@@ -63,6 +69,10 @@ public class LongArrayStore implements IntegerStore {
 	@Override
 	public long getInteger(int event) {
 		return values[event];
+	}
+
+	public void setParent(Bucket bucket) {
+		// not used
 	}
 
 }

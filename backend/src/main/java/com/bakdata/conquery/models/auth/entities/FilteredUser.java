@@ -4,7 +4,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.Callable;
 
-import com.bakdata.conquery.models.identifiable.ids.specific.PermissionOwnerId;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.shiro.authc.AuthenticationException;
 import org.apache.shiro.authc.AuthenticationToken;
@@ -17,7 +16,7 @@ import org.apache.shiro.subject.Subject;
 /**
  * Class to filter all unused functionality from the actual User class to keep it more compact and clean.
  * These are not supposed to be implemented.
- * 
+ *
  */
 @JsonIgnoreProperties({ "session", "previousPrincipals", "runAs", "principal", "authenticated", "remembered", "principals" })
 public abstract class FilteredUser implements Subject {
@@ -147,6 +146,6 @@ public abstract class FilteredUser implements Subject {
 	public boolean isRemembered() {
 		throw new UnsupportedOperationException();
 	}
-	
+
 
 }

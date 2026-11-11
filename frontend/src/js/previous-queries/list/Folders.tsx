@@ -1,0 +1,254 @@
+import { PlusIcon, XIcon } from "lucide-react";
+import { useCallback, useEffect } from "react";
+import { DialogTrigger } from "react-aria-components";
+import { useTranslation } from "react-i18next";
+import { useDispatch, useSelector } from "react-redux";
+import { tv } from "tailwind-variants";
+import type { StateT } from "../../app/reducers";
+import { DNDType } from "../../common/constants/dndTypes";
+import type { DragItemFormConfig } from "../../external-forms/types";
+import type { DragItemQuery } from "../../standard-query-editor/types";
+import { Button } from "../../ui-components/Button";
+import Dropzone from "../../ui-components/Dropzone";
+import { Tooltip, TooltipTrigger } from "../../ui-components/Tooltip";
+import {
+  removeFolderFromFilter,
+  setFolderFilter,
+  toggleNoFoldersFilter,
+} from "../folder-filter/actions";
+
+import AddFolderModal from "./AddFolderModal";
+import {
+  addFolder,
+  removeFolder,
+  useUpdateFormConfig,
+  useUpdateQuery,
+} from "./actions";
+import DeleteFolderModal from "./DeleteFolderModal";
+import Folder from "./Folder";
+import { useFolders } from "./selector";
+import { useDeleteProjectItemFolder } from "./useDeleteProjectItemFolder";
+
+const DROP_TYPES = [
+  DNDType.FORM_CONFIG,
+  DNDType.PREVIOUS_QUERY,
+  DNDType.PREVIOUS_SECONDARY_ID_QUERY,
+];
+
+const root = tv({
+  base: ["flex flex-col items-start", "shrink-0", "h-full", "overflow-hidden"],
+});
+
+// shown while the surrounding folder dropzone (group/folder) is hovered;
+// invisible rather than hidden, so it keeps its layout and its tooltip stays anchored
+const deleteButton = tv({
+  base: [
+    "absolute top-0 right-0",
+    "invisible group-hover/folder:visible",
+    "bg-bg-50",
+  ],
+});
+
+const folderDropzone = tv({
+  base: [
+    "group/folder",
+    "relative",
+    "justify-start",
+    "mb-[2px]",
+    "cursor-pointer",
+    "hover:bg-gray-50",
+  ],
+});
+
+const scrollContainer = tv({
+  base: [
+    "flex flex-col items-start",
+    "grow",
+    "w-full",
+    "overflow-y-auto overflow-x-hidden",
+  ],
+});
+
+const Folders = ({ className }: { className?: string }) => {
+  const folders = useFolders();
+  const localFolders = useSelector<StateT, string[]>(
+    (state) => state.previousQueries.localFolders,
+  );
+  const defaultFolders = useSelector<StateT, string[]>(
+    (state) => state.previousQueries.defaultFolders,
+  );
+  const folderFilter = useSelector<StateT, string[]>(
+    (state) => state.previousQueriesFolderFilter.folders,
+  );
+  const noFoldersActive = useSelector<StateT, boolean>(
+    (state) => state.previousQueriesFolderFilter.noFoldersActive,
+  );
+  const searchResult = useSelector<StateT, Record<string, number> | null>(
+    (state) => state.projectItemsSearch.result,
+  );
+  const searchResultWords = useSelector<StateT, string[]>(
+    (state) => state.projectItemsSearch.words,
+  );
+
+  const { t } = useTranslation();
+  const dispatch = useDispatch();
+  const onDeleteFolder = useDeleteProjectItemFolder();
+  const onToggleNoFoldersActive = () => dispatch(toggleNoFoldersFilter());
+  const onResetFolderFilter = useCallback(
+    () => dispatch(setFolderFilter([])),
+    [dispatch],
+  );
+
+  const onClickFolder = (folder: string) => {
+    if (!folderFilter.includes(folder)) {
+      dispatch(setFolderFilter([folder]));
+    } else {
+      dispatch(removeFolderFromFilter(folder));
+    }
+  };
+
+  const { updateQuery } = useUpdateQuery();
+  const { updateFormConfig } = useUpdateFormConfig();
+  const onDropIntoFolder = async (
+    item: DragItemQuery | DragItemFormConfig,
+    folder: string,
+  ) => {
+    if (item.tags.includes(folder)) {
+      return;
+    }
+
+    if (item.type === DNDType.FORM_CONFIG) {
+      await updateFormConfig(
+        item.id,
+        { tags: [...item.tags, folder] },
+        t("formConfig.retagError"),
+      );
+    } else {
+      await updateQuery(
+        item.id,
+        { tags: [...item.tags, folder] },
+        t("previousQuery.retagError"),
+      );
+    }
+
+    // Delete from the temporary "localFolders", because now it's a "real" folder
+    if (localFolders.includes(folder)) {
+      dispatch(removeFolder({ folderName: folder }));
+    }
+  };
+
+  useEffect(
+    function resetFolderFilterWhenFolderNotVisible() {
+      const isSomeActiveFolderInvisible = folderFilter.some(
+        (folder) => !folders.includes(folder),
+      );
+
+      if (isSomeActiveFolderInvisible) {
+        onResetFolderFilter();
+      }
+    },
+    [folders, onResetFolderFilter, folderFilter],
+  );
+
+  return (
+    <div className={root({ className })}>
+      <div className="@container mb-3 flex w-full min-w-[100px] items-start">
+        <DialogTrigger>
+          <Button intent="tertiary" size="sm">
+            <PlusIcon />
+            <span className="@max-[120px]:hidden">{t("folders.add")}</span>
+            <span className="@min-[120px]:hidden">{t("folders.addShort")}</span>
+          </Button>
+          <AddFolderModal
+            isValidName={(v) => v.length > 0 && !folders.includes(v)}
+            onSubmit={(v) => {
+              if (v.length > 0) dispatch(addFolder({ folderName: v }));
+            }}
+          />
+        </DialogTrigger>
+      </div>
+      <Folder
+        className="mb-[5px]"
+        key="all-queries"
+        folder={t("folders.allQueries")}
+        selected={folderFilter.length === 0 && !noFoldersActive}
+        onClick={onResetFolderFilter}
+        resultCount={searchResult ? searchResult.__all__ : null}
+        resultWords={[]}
+      />
+      <Folder
+        className="mb-[5px]"
+        key="no-folder"
+        special
+        folder={t("folders.noFolders")}
+        selected={noFoldersActive}
+        onClick={onToggleNoFoldersActive}
+        resultCount={searchResult ? searchResult.__without_folder__ : null}
+        resultWords={[]}
+      />
+      <div className={scrollContainer()}>
+        {folders.map((folder, i) => {
+          return (
+            <Dropzone
+              className={folderDropzone()}
+              key={`${folder}-${i}`}
+              naked
+              bare
+              onDrop={(item) =>
+                onDropIntoFolder(
+                  item as DragItemQuery | DragItemFormConfig,
+                  folder,
+                )
+              }
+              acceptedDropTypes={DROP_TYPES}
+              canDrop={(item) =>
+                (item.type === DNDType.FORM_CONFIG ||
+                  item.type === DNDType.PREVIOUS_QUERY ||
+                  item.type === DNDType.PREVIOUS_SECONDARY_ID_QUERY) &&
+                !!(item.own || item.shared)
+              }
+              onClick={() => onClickFolder(folder)}
+            >
+              {() => (
+                <>
+                  <Folder
+                    key={folder}
+                    folder={folder}
+                    selected={folderFilter.includes(folder)}
+                    onClick={() => onClickFolder(folder)}
+                    resultCount={
+                      searchResult ? (searchResult[folder] ?? 0) : null
+                    }
+                    resultWords={searchResultWords}
+                  />
+                  {!defaultFolders.includes(folder) && (
+                    <TooltipTrigger>
+                      <DialogTrigger>
+                        <div className={deleteButton()}>
+                          <Button
+                            size="sm"
+                            aria-label={t("common.delete")}
+                            intent="tertiary"
+                          >
+                            <XIcon />
+                          </Button>
+                        </div>
+                        <DeleteFolderModal
+                          folder={folder}
+                          onDeleteFolder={onDeleteFolder}
+                          onDeleteSuccess={() => dispatch(setFolderFilter([]))}
+                        />
+                      </DialogTrigger>
+                      <Tooltip>{t("common.delete")}</Tooltip>
+                    </TooltipTrigger>
+                  )}
+                </>
+              )}
+            </Dropzone>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+export default Folders;

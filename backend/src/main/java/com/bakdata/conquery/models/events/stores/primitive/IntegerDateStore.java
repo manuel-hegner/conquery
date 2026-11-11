@@ -2,6 +2,7 @@ package com.bakdata.conquery.models.events.stores.primitive;
 
 import com.bakdata.conquery.io.cps.CPSType;
 import com.bakdata.conquery.models.common.CDate;
+import com.bakdata.conquery.models.events.Bucket;
 import com.bakdata.conquery.models.events.stores.root.ColumnStore;
 import com.bakdata.conquery.models.events.stores.root.DateStore;
 import com.bakdata.conquery.models.events.stores.root.IntegerStore;
@@ -44,6 +45,11 @@ public class IntegerDateStore implements DateStore {
 	}
 
 	@Override
+	public IntegerDateStore createDescription() {
+		return new IntegerDateStore(store.createDescription());
+	}
+
+	@Override
 	public void setDate(int event, int value) {
 		store.setInteger(event, value);
 	}
@@ -62,6 +68,10 @@ public class IntegerDateStore implements DateStore {
 	@Override
 	public int getDate(int event) {
 		return (int) store.getInteger(event);
+	}
+
+	public void setParent(Bucket bucket) {
+		// not used
 	}
 
 }

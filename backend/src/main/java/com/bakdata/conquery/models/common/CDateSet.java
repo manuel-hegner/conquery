@@ -11,18 +11,14 @@ import java.util.NavigableMap;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import com.bakdata.conquery.models.common.daterange.CDateRange;
-import com.bakdata.conquery.models.preproc.parser.specific.DateRangeParser;
 import com.bakdata.conquery.util.DateReader;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ForwardingCollection;
 import com.google.common.math.IntMath;
 import lombok.EqualsAndHashCode;
-import lombok.NonNull;
 
 /**
  * (De-)Serializers are are registered programmatically because they depend on {@link DateReader}
@@ -32,13 +28,13 @@ public class CDateSet {
 
 	private final NavigableMap<Integer, CDateRange> rangesByLowerBound;
 	private transient Set<CDateRange> asRanges;
-	private transient Set<CDateRange> asDescendingSetOfRanges;
+	private transient Set<CDateRange> asDescendingSetOfRanges; // TODO remove?
 
-	public static CDateSet create() {
+	public static CDateSet createEmpty() {
 		return new CDateSet(new TreeMap<>());
 	}
 
-	
+
 	public static CDateSet createFull() {
 		CDateSet set = new CDateSet(new TreeMap<>());
 		set.add(CDateRange.all());
@@ -46,19 +42,19 @@ public class CDateSet {
 	}
 
 	public static CDateSet create(CDateSet rangeSet) {
-		CDateSet result = create();
+		CDateSet result = createEmpty();
 		result.addAll(rangeSet);
 		return result;
 	}
-	
+
 	public static CDateSet create(CDateRange range) {
-		CDateSet result = create();
+		CDateSet result = createEmpty();
 		result.add(range);
 		return result;
 	}
 
 	public static CDateSet create(Iterable<CDateRange> ranges) {
-		CDateSet result = create();
+		CDateSet result = createEmpty();
 		result.addAll(ranges);
 		return result;
 	}
@@ -102,11 +98,10 @@ public class CDateSet {
 			if (this == object) {
 				return true;
 			}
-			if (object instanceof Set) {
-				Set<?> o = (Set<?>) object;
+			if (object instanceof Set<?> other) {
 
 				try {
-					return this.size() == o.size() && this.containsAll(o);
+					return this.size() == other.size() && this.containsAll(other);
 				}
 				catch (NullPointerException | ClassCastException ignored) {
 					return false;
@@ -144,7 +139,7 @@ public class CDateSet {
 	public boolean contains(int value) {
 		return rangeContaining(value) != null;
 	}
-	
+
 	public boolean isEmpty() {
 		return asRanges().isEmpty();
 	}
@@ -153,11 +148,11 @@ public class CDateSet {
 		rangesByLowerBound.clear();
 	}
 
-	
+
 	public void addAll(CDateSet other) {
 		addAll(other.asRanges());
 	}
-	
+
 	public void removeAll(CDateSet other) {
 		removeAll(other.asRanges());
 	}
@@ -182,7 +177,7 @@ public class CDateSet {
 			remove(range);
 		}
 	}
-	
+
 	public boolean intersects(CDateRange range) {
 		checkNotNull(range);
 		Entry<Integer, CDateRange> ceilingEntry = rangesByLowerBound.ceilingEntry(range.getMinValue());
@@ -209,7 +204,7 @@ public class CDateSet {
 
 	public void add(CDateRange rangeToAdd) {
 		checkNotNull(rangeToAdd);
-		
+
 		int lbToAdd = rangeToAdd.getMinValue();
 		int ubToAdd = rangeToAdd.getMaxValue();
 
@@ -223,7 +218,7 @@ public class CDateSet {
 				if (rangeBelowLB.getMaxValue() > ubToAdd) {
 					ubToAdd = rangeBelowLB.getMaxValue();
 				}
-				
+
 			}
 		}
 
@@ -240,7 +235,7 @@ public class CDateSet {
 
 		putRange(CDateRange.of(lbToAdd, ubToAdd));
 	}
-	
+
 	public void remove(CDateRange rangeToRemove) {
 		checkNotNull(rangeToRemove);
 
@@ -250,7 +245,7 @@ public class CDateSet {
 			//left neighbor intersects removed range => shorten it to everything before removed range
 			if (rangeBelowLB.getMaxValue() >= rangeToRemove.getMinValue()) {
 				putRange(CDateRange.of(rangeBelowLB.getMinValue(), rangeToRemove.getMinValue() - 1));
-				
+
 				//left neighbor reaches beyond removed range => have to add cut of right part
 				if (rangeBelowLB.getMaxValue() > rangeToRemove.getMaxValue()) {
 					putRange(CDateRange.of(rangeToRemove.getMaxValue() + 1, rangeBelowLB.getMaxValue()));
@@ -276,7 +271,11 @@ public class CDateSet {
 	}
 
 
-	public void maskedAdd(CDateRange toAdd, CDateSet mask){
+	public void maskedAdd(CDateRange toAdd, CDateSet mask) {
+		maskedAdd(toAdd, mask, CDateRange.POSITIVE_INFINITY);
+	}
+
+	public void maskedAdd(CDateRange toAdd, CDateSet mask, int truncateMax){
 		if(mask.isEmpty()){
 			return;
 		}
@@ -322,27 +321,29 @@ public class CDateSet {
 
 			search = mask.rangesByLowerBound.higherKey(search);
 
-			int min = range.getMinValue();
-			int max = range.getMaxValue();
+			int lowerBound = range.getMinValue();
+			int upperBound = range.getMaxValue();
 
-			if(max < toAdd.getMinValue()){
+			if(upperBound < toAdd.getMinValue()){
 				continue;
 			}
 
-			if(min < toAdd.getMinValue()){
-				min = toAdd.getMinValue();
+			if(lowerBound < toAdd.getMinValue()){
+				lowerBound = toAdd.getMinValue();
 			}
 
-			if(max > toAdd.getMaxValue()){
-				max = toAdd.getMaxValue();
+			if(upperBound > toAdd.getMaxValue()){
+				upperBound = toAdd.getMaxValue();
 			}
+
+			upperBound = Math.min(upperBound, truncateMax);
 
 			// value was not contained
-			if(min > max){
+			if(lowerBound > upperBound){
 				continue;
 			}
 
-			add(CDateRange.of(min, max));
+			add(CDateRange.of(lowerBound, upperBound));
 		}
 	}
 
@@ -386,23 +387,23 @@ public class CDateSet {
 		}
 
 		List<CDateRange> l = new ArrayList<>(retained.rangesByLowerBound.values());
-		
+
 		//remove all before the first range
 		if(!l.get(0).isAtMost()) {
-			this.remove(CDateRange.of(Integer.MIN_VALUE, l.get(0).getMinValue() - 1));
+			this.remove(CDateRange.atMost(l.get(0).getMinValue() - 1));
 		}
-		
+
 		//remove all between ranges
-		for(int i=0;i<l.size()-1;i++) {
-			this.remove(CDateRange.of(l.get(i).getMaxValue() + 1, l.get(i+1).getMinValue() - 1));
+		for (int i = 0; i < l.size() - 1; i++) {
+			this.remove(CDateRange.of(l.get(i).getMaxValue() + 1, l.get(i + 1).getMinValue() - 1));
 		}
-		
+
 		//remove all after the last Range
-		if(!l.get(l.size()-1).isAtLeast()) {
-			this.remove(CDateRange.of(l.get(l.size()-1).getMaxValue() + 1, Integer.MAX_VALUE));
+		if (!l.get(l.size() - 1).isAtLeast()) {
+			this.remove(CDateRange.atLeast(l.get(l.size() - 1).getMaxValue() + 1));
 		}
 	}
-	
+
 	public void retainAll(CDateRange retained) {
 		if(retained.isAll()) {
 			return;
@@ -410,12 +411,12 @@ public class CDateSet {
 
 		//remove all before the range
 		if(!retained.isAtMost()) {
-			this.remove(CDateRange.of(Integer.MIN_VALUE, retained.getMinValue() - 1));
+			this.remove(CDateRange.atMost(retained.getMinValue() - 1));
 		}
-		
+
 		//remove all after the Range
 		if(!retained.isAtLeast()) {
-			this.remove(CDateRange.of(retained.getMaxValue() + 1, Integer.MAX_VALUE));
+			this.remove(CDateRange.atLeast(retained.getMaxValue() + 1));
 		}
 	}
 

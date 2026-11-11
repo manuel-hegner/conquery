@@ -24,37 +24,32 @@ public final class QuarterUtils {
 
 
 	public static Month getFirstMonthOfQuarter(int quarter) {
-		switch (quarter) {
-			case 1:
-				return Month.JANUARY;
-			case 2:
-				return Month.APRIL;
-			case 3:
-				return Month.JULY;
-			case 4:
-				return Month.OCTOBER;
-			default:
-				throw new IllegalStateException(String.format("Quarter %d exceeds 1-4", quarter));
-		}
+		return switch (quarter) {
+			case 1 -> Month.JANUARY;
+			case 2 -> Month.APRIL;
+			case 3 -> Month.JULY;
+			case 4 -> Month.OCTOBER;
+			default -> throw new IllegalStateException(String.format("Quarter %d exceeds 1-4", quarter));
+		};
 	}
 
 	public static LocalDate getFirstDayOfQuarter(int year, int quarter) {
 		Month month = getFirstMonthOfQuarter(quarter);
 		return LocalDate.of(year, month, 1);
 	}
-	
+
 	public static LocalDate getFirstDayOfQuarter(int epochDay) {
 		return LocalDate.ofEpochDay(epochDay).with(FIRST_DAY_OF_QUARTER_ADJUSTER);
 	}
-	
+
 	public static LocalDate getFirstDayOfQuarter(LocalDate date) {
 		return date.with(FIRST_DAY_OF_QUARTER_ADJUSTER);
 	}
-	
+
 	public static LocalDate getLastDayOfQuarter(int epochDay) {
 		return LocalDate.ofEpochDay(epochDay).with(LAST_DAY_OF_QUARTER_ADJUSTER);
 	}
-	
+
 	public static LocalDate getLastDayOfQuarter(LocalDate date) {
 		return date.with(LAST_DAY_OF_QUARTER_ADJUSTER);
 	}
@@ -68,7 +63,7 @@ public final class QuarterUtils {
 		LocalDate end = getLastDayOfQuarter(year, quarter);
 		return CDateRange.of(start, end);
 	}
-	
+
 	public static CDateRange fromDate(LocalDate date) {
 		return fromQuarter(date.getYear(), date.get(IsoFields.QUARTER_OF_YEAR));
 	}

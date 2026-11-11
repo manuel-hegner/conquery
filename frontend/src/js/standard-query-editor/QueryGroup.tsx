@@ -1,52 +1,39 @@
-import styled from "@emotion/styled";
-import React from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
 
-import { DateRangeT } from "../api/types";
-import { PreviousQueryIdT } from "../previous-queries/list/reducer";
-import WithTooltip from "../tooltip/WithTooltip";
+import type { DateRangeT, QueryT } from "../api/types";
+import type { PreviousQueryT } from "../previous-queries/list/reducer";
+import {
+  Tooltip,
+  TooltipTarget,
+  TooltipTrigger,
+  tooltipDelay,
+} from "../ui-components/Tooltip";
+import { C2 } from "../ui-components/Typography";
 
 import QueryEditorDropzone from "./QueryEditorDropzone";
 import QueryGroupActions from "./QueryGroupActions";
 import QueryNode from "./QueryNode";
-import type {
-  DragItemConceptTreeNode,
-  DragItemNode,
-  DragItemQuery,
-  PreviousQueryQueryNodeType,
-  QueryGroupType,
-} from "./types";
+import type { QueryGroupType, StandardQueryNodeT } from "./types";
 
-const Root = styled("div")`
-  font-size: ${({ theme }) => theme.font.sm};
-  max-width: 250px;
-`;
-
-const Group = styled("div")<{ excluded?: boolean }>`
-  position: relative;
-  padding: 6px 8px 8px;
-  background-color: ${({ theme }) => theme.col.bg};
-  border: 1px solid
-    ${({ theme, excluded }) => (excluded ? theme.col.red : theme.col.grayLight)};
-  box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.12);
-  text-align: center;
-  border-radius: ${({ theme }) => theme.borderRadius};
-  width: 220px;
-`;
-
-const QueryOrConnector = styled("p")`
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.sm};
-  color: ${({ theme }) => theme.col.gray};
-  text-align: center;
-`;
-
-// To override tippy here.
-// Maybe also possible in another way by adjusting
-// QueryEditorDropzone styles
-const SxWithTooltip = styled(WithTooltip)`
-  display: block !important;
-`;
+const groupBox = tv({
+  base: [
+    "relative",
+    "w-[220px]",
+    "pt-[6px] px-2 pb-2",
+    "bg-bg-50",
+    "shadow-[0_0_10px_0_rgba(0,0,0,0.12)]",
+    "rounded",
+    "text-center",
+  ],
+  variants: {
+    excluded: {
+      true: "border-2 border-red",
+      false: "border border-gray-100",
+    },
+  },
+});
 
 const isDateActive = (dateRange?: DateRangeT) => {
   return !!dateRange && (!!dateRange.min || !!dateRange.max);
@@ -55,66 +42,126 @@ const isDateActive = (dateRange?: DateRangeT) => {
 interface PropsT {
   group: QueryGroupType;
   andIdx: number;
-  onDropNode: (
-    node: DragItemQuery | DragItemNode | DragItemConceptTreeNode,
-  ) => void;
-  onDropFile: (file: File) => void;
-  onDeleteNode: (idx: number) => void;
-  onEditClick: (orIdx: number) => void;
-  onExcludeClick: () => void;
-  onExpandClick: (q: PreviousQueryQueryNodeType) => void;
-  onDateClick: () => void;
-  onDeleteGroup: () => void;
-  onLoadPreviousQuery: (id: PreviousQueryIdT) => void;
-  onToggleTimestamps: (orIdx: number) => void;
-  onToggleSecondaryIdExclude: (orIdx: number) => void;
+  onDropOrNode: (node: StandardQueryNodeT, andIdx: number) => void;
+  onDropFile: (file: File, andIdx: number) => void;
+  onImportLines: (lines: string[], filename?: string, andIdx?: number) => void;
+  onDeleteNode: (andIdx: number, orIdx: number) => void;
+  onEditClick: (andIdx: number, orIdx: number) => void;
+  onExpandClick: (q: QueryT) => void;
+  onExcludeClick: (andIdx: number) => void;
+  onDateClick: (andIdx: number) => void;
+  onDeleteGroup: (andIdx: number) => void;
+  onLoadPreviousQuery: (id: PreviousQueryT["id"]) => void;
+  onToggleTimestamps: (andIdx: number, orIdx: number) => void;
+  onToggleSecondaryIdExclude: (andIdx: number, orIdx: number) => void;
 }
 
-const QueryGroup = (props: PropsT) => {
+const QueryGroup = ({
+  group,
+  andIdx,
+  onExcludeClick,
+  onDateClick,
+  onDeleteGroup,
+  onDropOrNode,
+  onDropFile,
+  onImportLines,
+  onDeleteNode,
+  onEditClick,
+  onExpandClick,
+  onToggleTimestamps,
+  onToggleSecondaryIdExclude,
+  onLoadPreviousQuery,
+}: PropsT) => {
   const { t } = useTranslation();
 
+  const onDropNode = useCallback(
+    (item: StandardQueryNodeT) => {
+      onDropOrNode(item, andIdx);
+    },
+    [andIdx, onDropOrNode],
+  );
+  const excludeClick = useCallback(
+    () => onExcludeClick(andIdx),
+    [andIdx, onExcludeClick],
+  );
+  const deleteGroup = useCallback(
+    () => onDeleteGroup(andIdx),
+    [andIdx, onDeleteGroup],
+  );
+  const dateClick = useCallback(
+    () => onDateClick(andIdx),
+    [andIdx, onDateClick],
+  );
+  const dropFile = useCallback(
+    (file: File) => onDropFile(file, andIdx),
+    [andIdx, onDropFile],
+  );
+  const importLines = useCallback(
+    (lines: string[], filename?: string) =>
+      onImportLines(lines, filename, andIdx),
+    [andIdx, onImportLines],
+  );
+
   return (
-    <Root>
-      <SxWithTooltip text={t("help.editorDropzoneOr")} lazy>
-        <QueryEditorDropzone
-          key={props.group.elements.length + 1}
-          onDropNode={props.onDropNode}
-          onDropFile={props.onDropFile}
-          onLoadPreviousQuery={props.onLoadPreviousQuery}
-        />
-      </SxWithTooltip>
-      <QueryOrConnector>{t("common.or")}</QueryOrConnector>
-      <Group excluded={props.group.exclude}>
+    <div className="max-w-[250px] text-center">
+      <TooltipTrigger delay={tooltipDelay.long}>
+        <TooltipTarget as="div" excludeFromTabOrder>
+          <QueryEditorDropzone
+            key={group.elements.length + 1}
+            onDropNode={onDropNode}
+            onDropFile={dropFile}
+            onLoadPreviousQuery={onLoadPreviousQuery}
+            onImportLines={importLines}
+          />
+        </TooltipTarget>
+        <Tooltip>{t("help.editorDropzoneOr")}</Tooltip>
+      </TooltipTrigger>
+      <C2 tone="muted">{t("common.or")}</C2>
+      <div
+        className={groupBox({ excluded: !!group.exclude })}
+        data-test-id="query-group"
+      >
         <QueryGroupActions
-          excludeActive={!!props.group.exclude}
-          dateActive={isDateActive(props.group.dateRange)}
-          onExcludeClick={props.onExcludeClick}
-          onDeleteGroup={props.onDeleteGroup}
-          onDateClick={props.onDateClick}
+          excludeActive={!!group.exclude}
+          dateActive={isDateActive(group.dateRange)}
+          onExcludeClick={excludeClick}
+          onDeleteGroup={deleteGroup}
+          onDateClick={dateClick}
         />
-        {props.group.elements.map((node, orIdx) => (
-          <div key={`or-${orIdx}`}>
-            <QueryNode
-              node={node}
-              andIdx={props.andIdx}
-              orIdx={orIdx}
-              onDeleteNode={() => props.onDeleteNode(orIdx)}
-              onEditClick={() => props.onEditClick(orIdx)}
-              onToggleTimestamps={() => props.onToggleTimestamps(orIdx)}
-              onToggleSecondaryIdExclude={() =>
-                props.onToggleSecondaryIdExclude(orIdx)
-              }
-              onExpandClick={props.onExpandClick}
-            />
-            {orIdx !== props.group.elements.length - 1 && (
-              <QueryOrConnector key={"last-or"}>
-                {t("common.or")}
-              </QueryOrConnector>
-            )}
-          </div>
-        ))}
-      </Group>
-    </Root>
+        {useMemo(
+          () =>
+            group.elements.map((node, orIdx) => (
+              <div key={`or-${orIdx}`}>
+                <QueryNode
+                  node={node}
+                  andIdx={andIdx}
+                  orIdx={orIdx}
+                  onDeleteNode={onDeleteNode}
+                  onEditClick={onEditClick}
+                  onToggleTimestamps={onToggleTimestamps}
+                  onToggleSecondaryIdExclude={onToggleSecondaryIdExclude}
+                  onExpandClick={onExpandClick}
+                />
+                {orIdx !== group.elements.length - 1 && (
+                  <C2 tone="muted" key={"last-or"}>
+                    {t("common.or")}
+                  </C2>
+                )}
+              </div>
+            )),
+          [
+            t,
+            andIdx,
+            group.elements,
+            onDeleteNode,
+            onEditClick,
+            onToggleTimestamps,
+            onToggleSecondaryIdExclude,
+            onExpandClick,
+          ],
+        )}
+      </div>
+    </div>
   );
 };
 

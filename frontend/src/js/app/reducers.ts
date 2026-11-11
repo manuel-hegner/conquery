@@ -1,99 +1,116 @@
 import { combineReducers } from "redux";
-
+import conceptTrees, {
+  type ConceptTreesStateT,
+} from "../concept-trees/reducer";
 import conceptTreesOpen, {
-  ConceptTreesOpenStateT,
+  type ConceptTreesOpenStateT,
 } from "../concept-trees-open/reducer";
-import conceptTrees, { ConceptTreesStateT } from "../concept-trees/reducer";
-import datasets, { DatasetStateT } from "../dataset/reducer";
-import formConfigsFilter, {
-  FormConfigsFilterStateT,
-} from "../external-forms/form-configs/filter/reducer";
-import formConfigs, {
-  FormConfigsStateT,
-} from "../external-forms/form-configs/reducer";
-import formConfigsSearch, {
-  FormConfigsSearchStateT,
-} from "../external-forms/form-configs/search/reducer";
-import panes, { PanesStateT } from "../pane/reducer";
-import type { TabT } from "../pane/types";
-import preview, { PreviewStateT } from "../preview/reducer";
-import previousQueriesFilter, {
-  PreviousQueriesFilterStateT,
+import datasets, { type DatasetStateT } from "../dataset/reducer";
+import entityHistory, {
+  type EntityHistoryStateT,
+} from "../entity-history/reducer";
+import type { Form } from "../external-forms/config-types";
+import {
+  activeFormReducer,
+  availableFormsReducer,
+} from "../external-forms/reducer";
+import infoPane, { type InfoPaneStateT } from "../info-pane/reducer";
+import panes, { type PanesStateT } from "../pane/reducer";
+import preview, { type PreviewStateT } from "../preview/reducer";
+import projectItemsFilter, {
+  type ProjectItemsFilterStateT,
 } from "../previous-queries/filter/reducer";
 import previousQueriesFolderFilter, {
-  PreviousQueriesFolderFilterStateT,
-} from "../previous-queries/folderFilter/reducer";
+  type PreviousQueriesFolderFilterStateT,
+} from "../previous-queries/folder-filter/reducer";
 import previousQueries, {
-  PreviousQueriesStateT,
+  type PreviousQueriesStateT,
 } from "../previous-queries/list/reducer";
-import previousQueriesSearch, {
-  QueriesSearchStateT,
+import projectItemsSearch, {
+  type ProjectItemsSearchStateT,
 } from "../previous-queries/search/reducer";
-import {
-  createQueryNodeEditorReducer,
-  QueryNodeEditorStateT,
-} from "../query-node-editor/reducer";
-import queryUploadConceptListModal, {
-  QueryUploadConceptListModalStateT,
-} from "../query-upload-concept-list-modal/reducer";
-import snackMessage, { SnackMessageStateT } from "../snack-message/reducer";
-import type { StandardQueryEditorStateT } from "../standard-query-editor";
-import startup, { StartupStateT } from "../startup/reducer";
-import tooltip, { TooltipStateT } from "../tooltip/reducer";
+import projectItemsTypeFilter, {
+  type ProjectItemsTypeFilterStateT,
+} from "../previous-queries/type-filter/reducer";
+import createQueryRunnerReducer, {
+  type QueryRunnerStateT,
+} from "../query-runner/reducer";
+import snackMessage, {
+  type SnackMessageStateT,
+} from "../snack-message/reducer";
+import queryReducer, {
+  type StandardQueryStateT,
+} from "../standard-query-editor/queryReducer";
+import selectedSecondaryIdsReducer, {
+  type SelectedSecondaryIdStateT,
+} from "../standard-query-editor/selectedSecondaryIdReducer";
+import startup, { type StartupStateT } from "../startup/reducer";
 import uploadConceptListModal, {
-  UploadConceptListModalStateT,
+  type UploadConceptListModalStateT,
 } from "../upload-concept-list-modal/reducer";
-import user, { UserStateT } from "../user/reducer";
+import user, { type UserStateT } from "../user/reducer";
 
-// TODO: Introduce more StateTypes gradually
 export type StateT = {
   conceptTrees: ConceptTreesStateT;
   conceptTreesOpen: ConceptTreesOpenStateT;
   datasets: DatasetStateT;
-  tooltip: TooltipStateT;
+  infoPane: InfoPaneStateT;
   panes: PanesStateT;
   uploadConceptListModal: UploadConceptListModalStateT;
-  queryUploadConceptListModal: QueryUploadConceptListModalStateT;
   user: UserStateT;
-  queryEditor: StandardQueryEditorStateT;
-  queryNodeEditor: QueryNodeEditorStateT;
   startup: StartupStateT;
   previousQueries: PreviousQueriesStateT;
-  previousQueriesSearch: QueriesSearchStateT;
-  previousQueriesFilter: PreviousQueriesFilterStateT;
+  projectItemsSearch: ProjectItemsSearchStateT;
+  projectItemsFilter: ProjectItemsFilterStateT;
+  projectItemsTypeFilter: ProjectItemsTypeFilterStateT;
   previousQueriesFolderFilter: PreviousQueriesFolderFilterStateT;
-  formConfigs: FormConfigsStateT;
-  formConfigsSearch: FormConfigsSearchStateT;
-  formConfigsFilter: FormConfigsFilterStateT;
   preview: PreviewStateT;
   snackMessage: SnackMessageStateT;
+  editorV2QueryRunner: QueryRunnerStateT;
+  queryEditor: {
+    query: StandardQueryStateT;
+    selectedSecondaryId: SelectedSecondaryIdStateT;
+    queryRunner: QueryRunnerStateT;
+  };
+  externalForms: {
+    activeForm: string | null;
+    queryRunner: QueryRunnerStateT;
+    availableForms: {
+      [formName: string]: Form;
+    };
+  };
+  entityHistory: EntityHistoryStateT;
 };
 
-const buildAppReducer = (tabs: TabT[]) => {
+const buildAppReducer = () => {
   return combineReducers({
     startup,
     conceptTrees,
     conceptTreesOpen,
     uploadConceptListModal,
-    queryUploadConceptListModal,
-    queryNodeEditor: createQueryNodeEditorReducer("standard"),
     datasets,
-    tooltip,
+    infoPane,
     panes,
     previousQueries,
-    previousQueriesSearch,
-    previousQueriesFilter,
+    projectItemsSearch,
+    projectItemsFilter,
+    projectItemsTypeFilter,
     previousQueriesFolderFilter,
     snackMessage,
     preview,
     user,
-    formConfigs,
-    formConfigsSearch,
-    formConfigsFilter,
-    ...tabs.reduce((all, tab) => {
-      all[tab.key] = tab.reducer;
-      return all;
-    }, {}),
+    entityHistory,
+    editorV2QueryRunner: createQueryRunnerReducer("editorV2"),
+    queryEditor: combineReducers({
+      query: queryReducer,
+      selectedSecondaryId: selectedSecondaryIdsReducer,
+      queryRunner: createQueryRunnerReducer("standard"),
+    }),
+    externalForms: combineReducers({
+      activeForm: activeFormReducer,
+      availableForms: availableFormsReducer,
+      queryRunner: createQueryRunnerReducer("externalForms"),
+    }),
   });
 };
 

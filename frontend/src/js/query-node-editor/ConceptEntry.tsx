@@ -1,87 +1,69 @@
-import styled from "@emotion/styled";
-import React from "react";
+import { TrashIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
+import { tv } from "tailwind-variants";
 import type { ConceptIdT, ConceptT } from "../api/types";
-import IconButton from "../button/IconButton";
-import AdditionalInfoHoverable from "../tooltip/AdditionalInfoHoverable";
+import { getConceptById } from "../concept-trees/globalTreeStoreHelper";
+import AdditionalInfoHoverable from "../info-pane/AdditionalInfoHoverable";
+import { Button } from "../ui-components/Button";
+import { C2, C3 } from "../ui-components/Typography";
 
-const Concept = styled("div")`
-  background-color: white;
-  border: 1px solid ${({ theme }) => theme.col.gray};
-  padding: 5px 15px;
-  border-radius: ${({ theme }) => theme.borderRadius};
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  margin-top: 5px;
-`;
-
-const ConceptContainer = styled("div")`
-  flex-grow: 1;
-`;
-
-const ConceptEntryHeadline = styled("h6")`
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.sm};
-  font-weight: 400;
-`;
-
-const ConceptEntryDescription = styled("p")`
-  margin: 0;
-  font-size: ${({ theme }) => theme.font.xs};
-`;
-
-const NotFound = styled(ConceptEntryHeadline)`
-  color: ${({ theme }) => theme.col.red};
-`;
-
-const SxIconButton = styled(IconButton)`
-  flex-shrink: 0;
-`;
+const concept = tv({
+  base: [
+    "flex flex-row items-center",
+    "rounded",
+    "border border-gray-500",
+    "bg-white",
+    "px-2 py-1",
+  ],
+});
 
 interface Props {
-  node: ConceptT;
   conceptId: ConceptIdT;
+  root: ConceptT;
   canRemoveConcepts?: boolean;
   onRemoveConcept: (conceptId: ConceptIdT) => void;
 }
 
 const ConceptEntry = ({
-  node,
   conceptId,
+  root,
   canRemoveConcepts,
   onRemoveConcept,
 }: Props) => {
   const { t } = useTranslation();
+  const node = getConceptById(conceptId);
 
-  return (
-    <AdditionalInfoHoverable node={node}>
-      <Concept>
-        <ConceptContainer>
-          {!node ? (
-            <NotFound>{t("queryNodeEditor.nodeNotFound")}</NotFound>
-          ) : (
-            <>
-              <ConceptEntryHeadline>{node.label}</ConceptEntryHeadline>
-              {node.description && (
-                <ConceptEntryDescription>
-                  {node.description}
-                </ConceptEntryDescription>
-              )}
-            </>
-          )}
-        </ConceptContainer>
-        {canRemoveConcepts && (
-          <SxIconButton
-            onClick={() => onRemoveConcept(conceptId)}
-            tiny
-            regular
-            icon="trash-alt"
-          />
+  const ConceptEntryRoot = (
+    <div className={concept()}>
+      <div className="grow">
+        {!node ? (
+          <C2 tone="danger">{t("queryNodeEditor.nodeNotFound")}</C2>
+        ) : (
+          <>
+            <C2>{node.label}</C2>
+            {node.description && <C3>{node.description}</C3>}
+          </>
         )}
-      </Concept>
+      </div>
+      {canRemoveConcepts && (
+        <Button
+          intent="tertiary"
+          size="sm"
+          aria-label={t("common.delete")}
+          onPress={() => onRemoveConcept(conceptId)}
+        >
+          <TrashIcon />
+        </Button>
+      )}
+    </div>
+  );
+
+  return node && root ? (
+    <AdditionalInfoHoverable node={node} root={root}>
+      {ConceptEntryRoot}
     </AdditionalInfoHoverable>
+  ) : (
+    ConceptEntryRoot
   );
 };
 

@@ -1,36 +1,29 @@
-import styled from "@emotion/styled";
-import React from "react";
-
-import IconButton from "../../button/IconButton";
+import { PlusIcon, XIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+import { Button } from "../../ui-components/Button";
 
 interface PropsT {
   className?: string;
   label?: string;
-  items: Array<Element>;
-  limit?: number;
+  items: ReactNode[];
+  limit: number;
   onAddClick: () => void;
   onRemoveClick: (idx: number) => void;
 }
 
-const Container = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-`;
+const container = tv({
+  base: ["flex flex-wrap", "gap-2", "p-1"],
+});
 
-const AddBtn = styled(IconButton)``;
+const removeButton = tv({
+  base: ["absolute -top-[7px] -right-[7px]", "z-1", "rounded bg-white"],
+});
 
-const RemoveBtn = styled(IconButton)`
-  position: absolute;
-  top: -5px;
-  right: -7px;
-  background-color: white;
-`;
-
-const GroupItem = styled("div")`
-  padding: 2px 2px 2px 0;
-  position: relative;
-  margin: 0 5px 5px 0;
-`;
+const groupItem = tv({
+  base: ["relative", "max-w-[200px]", "py-[2px] pr-[2px] pl-0"],
+});
 
 const DynamicInputGroup = ({
   className,
@@ -40,30 +33,49 @@ const DynamicInputGroup = ({
   onRemoveClick,
   onAddClick,
 }: PropsT) => {
+  const { t } = useTranslation();
   // 0 means "infinite"
   const limitNotReached = limit === 0 || items.length < limit;
 
   return (
-    <Container className={className}>
+    <div className={container({ className })}>
       {label && <span>{label}</span>}
       {items.map((item, idx) => (
-        <GroupItem key={idx}>
+        <div className={groupItem()} key={idx}>
           {item}
           {/*
             No need to display the remove button, when limit is 1.
-            Assumes that this component is always nested within another container 
+            Assumes that this component is always nested within another container
             that allows to remove that item.
 
             In case you stumble accross this and you're not sure,
             you can also just delete the following constraint:
            */}
           {limit !== 1 && (
-            <RemoveBtn tiny icon="times" onClick={() => onRemoveClick(idx)} />
+            <div className={removeButton()}>
+              <Button
+                intent="tertiary"
+                size="sm"
+                aria-label={t("common.delete")}
+                onPress={() => onRemoveClick(idx)}
+              >
+                <XIcon />
+              </Button>
+            </div>
           )}
-        </GroupItem>
+        </div>
       ))}
-      {limitNotReached && <AddBtn icon="plus" tiny onClick={onAddClick} />}
-    </Container>
+      {limitNotReached && (
+        <Button
+          intent="tertiary"
+          size="sm"
+          aria-label={t("common.add")}
+          onPress={onAddClick}
+        >
+          <PlusIcon />
+        </Button>
+      )}
+    </div>
   );
 };
 

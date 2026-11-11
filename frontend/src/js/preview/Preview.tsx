@@ -1,251 +1,205 @@
-import { css } from "@emotion/react";
-import styled from "@emotion/styled";
-import { StateT } from "app-types";
-import * as React from "react";
-import Hotkeys from "react-hot-keys";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  LoaderCircleIcon,
+} from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
+import { MenuTrigger } from "react-aria-components";
+import { useHotkeys } from "react-hotkeys-hook";
 import { useTranslation } from "react-i18next";
-import { useSelector, useDispatch } from "react-redux";
-
-import type { ColumnDescription, ColumnDescriptionKind } from "../api/types";
-import { getDiffInDays, parseStdDate } from "../common/helpers/dateHelper";
-
-import { Cell } from "./Cell";
-import DateCell from "./DateCell";
-import PreviewInfo from "./PreviewInfo";
-import { StatsHeadline } from "./StatsHeadline";
-import StatsSubline from "./StatsSubline";
+import { useDispatch, useSelector } from "react-redux";
+import { tv } from "tailwind-variants";
+import type { PreviewStatistics, SecondaryId } from "../api/types";
+import type { StateT } from "../app/reducers";
+import MatchingStats from "../info-pane/MatchingStats";
+import { Button } from "../ui-components/Button";
+import { Card } from "../ui-components/Card";
+import { Menu, MenuItem } from "../ui-components/Menu";
+import { C3, H3 } from "../ui-components/Typography";
 import { closePreview } from "./actions";
+import Charts, { DIAGRAMS_PER_PAGE } from "./Charts";
+import DiagramModal from "./DiagramModal";
+import Pagination from "./Pagination";
 import type { PreviewStateT } from "./reducer";
+import ScrollBox from "./ScrollBox";
+import Table from "./Table";
 
-const Root = styled("div")`
-  height: 100%;
-  width: 100%;
-  position: fixed;
-  top: 0;
-  left: 0;
-  background-color: white;
-  padding: 60px 20px 20px;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-`;
+const fullScreen = tv({
+  base: ["fixed top-0 left-0", "z-2", "h-full w-full", "bg-bg-100"],
+});
 
-const Line = styled("div")<{ isHeader?: boolean }>`
-  display: flex;
-  width: 100%;
-  align-items: center;
-  line-height: 10px;
+const content = tv({
+  base: ["flex flex-col", "gap-5", "px-5 pt-[55px] pb-5"],
+});
 
-  ${({ isHeader }) =>
-    isHeader &&
-    css`
-      border-bottom: "1px solid #ccc";
-      align-items: flex-end;
-      margin: "0 0 10px";
-    `};
-`;
+const topRow = tv({ base: ["flex items-center", "gap-[30px]"] });
 
-const CSVFrame = styled("div")`
-  flex-grow: 1;
-  overflow: hidden;
-  padding: 10px;
-  box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.2);
-`;
+const section = tv({ base: ["flex flex-col", "gap-[10px]"] });
 
-const ScrollWrap = styled("div")`
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-`;
+const sectionHeader = tv({
+  base: ["flex items-start justify-between", "gap-5"],
+});
 
-const List = styled("div")`
-  position: relative;
-  height: 100%;
-  flex-grow: 1;
-`;
+// the stats stand beside the charts, like the info pane beside the panes
+const statistics = tv({
+  base: ["grid grid-cols-[auto_minmax(0,1fr)]", "gap-5", "items-start"],
+});
 
-export type ColumnDescriptionType = ColumnDescriptionKind | "OTHER";
+const loading = tv({
+  base: ["flex items-center justify-center", "h-[65vh]"],
+});
 
-const SUPPORTED_COLUMN_DESCRIPTION_KINDS = new Set<ColumnDescriptionKind>([
-  "BOOLEAN",
-  "INTEGER",
-  "NUMERIC",
-  "MONEY",
-  "DATE",
-  "DATE_RANGE",
-  "LIST[DATE_RANGE]",
-  "STRING",
-  "CATEGORICAL",
-  "RESOLUTION",
-]);
+const SectionHeader = ({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children?: ReactNode;
+}) => (
+  <div className={sectionHeader()}>
+    <div className="min-w-0">
+      <H3>{title}</H3>
+      <C3 tone="muted">{subtitle}</C3>
+    </div>
+    {children}
+  </div>
+);
 
-function detectColumnType(
-  cell: string,
-  resultColumns: ColumnDescription[],
-): ColumnDescriptionType {
-  if (cell === "dates") return "DATE_RANGE";
-
-  const maybeColumn = resultColumns.find((column) => column.label === cell);
-
-  if (maybeColumn && SUPPORTED_COLUMN_DESCRIPTION_KINDS.has(maybeColumn.type)) {
-    if (maybeColumn.type === "LIST[DATE_RANGE]") {
-      return "DATE_RANGE";
-    }
-    return maybeColumn.type;
-  }
-
-  return "OTHER";
-}
-
-function detectColumnTypesByHeader(
-  line: string[],
-  resultColumns: ColumnDescription[],
-) {
-  return line.map((cell) => detectColumnType(cell, resultColumns));
-}
-
-function getFirstAndLastDateOfRange(dateStr: string) {
-  const dateStrTrimmed = dateStr.slice(1, dateStr.length - 1);
-
-  const ranges = dateStrTrimmed.split(",");
-  const first = parseStdDate(ranges[0].split("/")[0]);
-  const last = parseStdDate(ranges[ranges.length - 1].split("/")[1]);
-
-  return { first, last };
-}
-
-function getMinMaxDates(
-  rows: string[][],
-  columns: string[],
-): {
-  min: Date | null;
-  max: Date | null;
-  diff: number;
-} {
-  let min = null;
-  let max = null;
-
-  const dateColumn = columns.find((col) => col === "DATE_RANGE");
-  const dateColumnIdx = dateColumn ? columns.indexOf(dateColumn) : -1;
-
-  if (dateColumnIdx === -1) return { min: null, max: null, diff: 0 };
-
-  for (let row of rows) {
-    // To cut off '{' and '}'
-    const cell = row[dateColumnIdx];
-    const { first, last } = getFirstAndLastDateOfRange(cell);
-
-    if (!!first && (!min || first < min)) {
-      min = first;
-    }
-    if (!!last && (!max || last > max)) {
-      max = last;
-    }
-  }
-
-  return {
-    min,
-    max,
-    diff: min && max ? getDiffInDays(min, max) : 0,
-  };
-}
-
-const Preview: React.FC = () => {
+export default function Preview() {
   const preview = useSelector<StateT, PreviewStateT>((state) => state.preview);
+  const loadedSecondaryIds = useSelector<StateT, SecondaryId[]>(
+    (state) => state.conceptTrees.secondaryIds,
+  );
   const dispatch = useDispatch();
   const { t } = useTranslation();
-
+  const [page, setPage] = useState<number>(0);
+  const [popOver, setPopOver] = useState<PreviewStatistics | null>(null);
   const onClose = () => dispatch(closePreview());
+  const stats = preview.statisticsData;
+  const idLabel = useMemo(() => {
+    const primaryIdLabel = t("common.entitiesFound", { count: 2 });
+    if (preview.queryData?.secondaryId) {
+      const secondaryIdLabel = loadedSecondaryIds.find(
+        (x) => x.id === preview.queryData?.secondaryId,
+      )?.label;
+      return t("preview.idLabel", { primaryIdLabel, secondaryIdLabel });
+    } else {
+      return `${t("queryEditor.secondaryIdStandard")} (${primaryIdLabel})`;
+    }
+  }, [preview.queryData, loadedSecondaryIds, t]);
 
-  if (!preview.csv || !preview.resultColumns) return null;
-
-  // Limit size:
-  const RENDER_ROWS_LIMIT = 500;
-  const previewData = preview.csv.slice(0, RENDER_ROWS_LIMIT + 1); // +1 Header row
-
-  if (previewData.length < 2) return null;
-
-  const columns = detectColumnTypesByHeader(
-    previewData[0],
-    preview.resultColumns,
-  );
-
-  const { min, max, diff } = getMinMaxDates(previewData.slice(1), columns);
-
-  const Row = ({ index }: { index: number }) => (
-    <Line key={index}>
-      {previewData[index + 1].map((cell, j) => {
-        if (columns[j] === "DATE_RANGE" && min && max) {
-          return (
-            <DateCell cell={cell} key={j} minDate={min} dateDiffInDays={diff} />
-          );
-        }
-
-        if (columns[j] === "MONEY") {
-          const cellAsCents = parseInt(cell);
-
-          return (
-            <Cell
-              title={cell}
-              key={j}
-              style={{
-                textAlign: "right",
-              }}
-            >
-              {isNaN(cellAsCents)
-                ? cell
-                : (cellAsCents / 100).toFixed(2).replace(".", ",")}
-            </Cell>
-          );
-        }
-
-        return (
-          <Cell title={cell} key={j}>
-            {cell}
-          </Cell>
-        );
-      })}
-    </Line>
-  );
+  useHotkeys("esc", () => {
+    if (!popOver) onClose();
+  });
 
   return (
-    <Root>
-      <Hotkeys keyName="escape" onKeyDown={onClose} />
-      <PreviewInfo
-        rawPreviewData={preview.csv}
-        columns={columns}
-        onClose={onClose}
-        minDate={min}
-        maxDate={max}
-      />
-      <StatsHeadline>{t("preview.previewHeadline")}</StatsHeadline>
-      <StatsSubline>
-        {t("preview.previewSubline", { count: RENDER_ROWS_LIMIT })}
-      </StatsSubline>
-      <CSVFrame>
-        <ScrollWrap>
-          <Line isHeader>
-            {previewData[0].map((cell, k) => (
-              <Cell
-                isHeader
-                key={k}
-                title={cell}
-                isDates={columns[k] === "DATE_RANGE"}
-              >
-                {cell}
-              </Cell>
-            ))}
-          </Line>
-          <List>
-            {previewData.slice(1).map((_, i) => (
-              <Row key={i} index={i} />
-            ))}
-          </List>
-        </ScrollWrap>
-      </CSVFrame>
-    </Root>
+    <div className={fullScreen()}>
+      <ScrollBox className="h-full">
+        <div className={content()}>
+          <div className={topRow()}>
+            <Button intent="secondary" onPress={onClose}>
+              <ChevronLeftIcon />
+              {t("common.back")}
+            </Button>
+            <div className="min-w-0">
+              <H3 truncate>{preview.queryData?.label}</H3>
+              <C3 tone="muted">{t("preview.headline")}</C3>
+            </div>
+          </div>
+          <section className={section()}>
+            <SectionHeader
+              title={t("preview.statisticsHeadline")}
+              subtitle={t("preview.statisticsSubline")}
+            >
+              {stats && (
+                <MenuTrigger>
+                  <Button intent="secondary">
+                    {t("preview.statisticsHeadline")}
+                    <ChevronDownIcon />
+                  </Button>
+                  <Menu
+                    aria-label={t("preview.statisticsHeadline")}
+                    placement="bottom end"
+                    onAction={(key) => {
+                      const stat = stats.statistics.find(
+                        (stat) => stat.label === key,
+                      );
+                      setPopOver(stat ?? null);
+                    }}
+                  >
+                    {stats.statistics.map((stat) => (
+                      <MenuItem key={stat.label} id={stat.label}>
+                        {stat.label}
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </MenuTrigger>
+              )}
+            </SectionHeader>
+            <div className={statistics()}>
+              <div className="max-w-[200px]">
+                <MatchingStats
+                  matchingEntities={stats?.entities}
+                  matchingEntries={stats?.total}
+                  dateRange={stats?.dateRange}
+                  idLabel={idLabel}
+                />
+              </div>
+              <Card>
+                {stats ? (
+                  <Charts
+                    statistics={stats.statistics}
+                    showPopup={(statistic: PreviewStatistics) => {
+                      setPopOver(statistic);
+                    }}
+                    page={page}
+                  />
+                ) : (
+                  <div className={loading()}>
+                    <LoaderCircleIcon className="size-[30px]" />
+                  </div>
+                )}
+              </Card>
+            </div>
+            {stats && (
+              <Pagination
+                page={page}
+                pageCount={Math.ceil(
+                  stats.statistics.length / DIAGRAMS_PER_PAGE,
+                )}
+                setPage={setPage}
+              />
+            )}
+          </section>
+          {popOver && (
+            <DiagramModal
+              statistic={popOver}
+              onClose={() => setPopOver(null)}
+            />
+          )}
+          {preview.arrowReader &&
+            preview.initialTableData?.value &&
+            preview.queryData && (
+              <section className={section()}>
+                <SectionHeader
+                  title={t("preview.previewHeadline")}
+                  subtitle={t("preview.previewSubline", {
+                    count: preview.initialTableData.value.numRows,
+                  })}
+                />
+                <Card>
+                  <Table
+                    arrowReader={preview.arrowReader}
+                    initialTableData={preview.initialTableData}
+                    queryData={preview.queryData}
+                  />
+                </Card>
+              </section>
+            )}
+        </div>
+      </ScrollBox>
+    </div>
   );
-};
-
-export default Preview;
+}

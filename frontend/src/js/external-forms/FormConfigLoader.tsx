@@ -1,0 +1,196 @@
+import { memo, type ReactNode, useEffect, useState } from "react";
+import { useFormContext } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import { useDispatch, useSelector } from "react-redux";
+import { tv } from "tailwind-variants";
+import { useGetFormConfig } from "../api/api";
+import type { SelectOptionT } from "../api/types";
+import type { StateT } from "../app/reducers";
+import { DNDType } from "../common/constants/dndTypes";
+import { type Language, useActiveLang } from "../localization/useActiveLang";
+import type { FormConfigT } from "../previous-queries/list/reducer";
+import { setMessage } from "../snack-message/actions";
+import Dropzone from "../ui-components/Dropzone";
+
+import { setExternalForm } from "./actions";
+import type { Field, Form, FormField, Tabs } from "./config-types";
+import type { FormConceptGroupT } from "./form-concept-group/formConceptGroupState";
+import { collectAllFormFields, getUniqueFieldname } from "./helper";
+import { selectActiveFormType, selectFormConfig } from "./stateSelectors";
+import type { DragItemFormConfig } from "./types";
+
+const root = tv({
+  base: ["flex items-center", "rounded"],
+});
+
+const dropzone = tv({
+  base: ["pt-[10px] pr-5 pb-5 pl-[10px]", "text-gray-800"],
+});
+
+const DROP_TYPES = [DNDType.FORM_CONFIG];
+
+// Potentially transform the stored field value to support older saved form configs
+//
+// because we changed the SELECT values:
+// from string, e.g. 'next'
+// to SelectValueT, e.g. { value: 'next', label: 'Next' }
+//
+// and because we introduced the DNDTypes (CONCEPT_LIST)
+const transformLoadedFieldValue = (
+  field: FormField,
+  value: unknown,
+  {
+    activeLang,
+    datasetOptions,
+  }: { activeLang: Language; datasetOptions: SelectOptionT[] },
+) => {
+  switch (field.type) {
+    case "CONCEPT_LIST":
+      return (value as FormConceptGroupT[]).map((group) => ({
+        ...group,
+        concepts: group.concepts.map((concept) => ({
+          ...concept,
+          type: DNDType.CONCEPT_TREE_NODE,
+        })),
+      }));
+    case "DATASET_SELECT":
+      if (typeof value === "object") return value as SelectOptionT;
+      if (typeof value === "string") {
+        return datasetOptions.find((option) => option.value === value);
+      }
+
+      return value;
+    case "SELECT":
+      if (typeof value === "object") return value as SelectOptionT;
+      if (typeof value === "string") {
+        const options = field.options.map((option) => ({
+          label: option.label[activeLang] || "",
+          value: option.value,
+        }));
+
+        return options.find((option) => option.value === value);
+      }
+      return value;
+    default:
+      return value;
+  }
+};
+
+const FormConfigLoader = ({
+  className,
+  children,
+  datasetOptions,
+}: {
+  datasetOptions: SelectOptionT[];
+  className?: string;
+  children: () => ReactNode;
+}) => {
+  const { t } = useTranslation();
+  const activeLang = useActiveLang();
+  const dispatch = useDispatch();
+  const [formConfigToLoadNext, setFormConfigToLoadNext] =
+    useState<FormConfigT | null>(null);
+
+  const activeFormType = useSelector<StateT, string | null>((state) =>
+    selectActiveFormType(state),
+  );
+
+  const { setValue } = useFormContext();
+
+  const formConfig = useSelector<StateT, Form | null>(selectFormConfig);
+
+  const getFormConfig = useGetFormConfig();
+
+  useEffect(
+    function deferredLoadFormConfig() {
+      // Needs to be deferred because the form type might get changed
+      // and other effects will have to run to reset / initialize the form first
+      // before we can load new values into it
+      if (!formConfig || !formConfigToLoadNext) return;
+
+      const entries = Object.entries(formConfigToLoadNext.values);
+      const formFields = collectAllFormFields(formConfig.fields);
+
+      for (const [fieldname, value] of entries) {
+        // --------------------------
+        // Potentially transform the stored field value to support older saved form configs
+        // because we changed the SELECT values:
+        // from string, e.g. 'next'
+        // to SelectValueT, e.g. { value: 'next', label: 'Next' }
+        const field = formFields.find(
+          (f): f is Field | Tabs =>
+            f.type !== "GROUP" &&
+            f.name === getUniqueFieldname(formConfig.type, fieldname),
+        );
+
+        if (!field) continue;
+
+        const fieldValue = transformLoadedFieldValue(field, value, {
+          activeLang,
+          datasetOptions,
+        });
+        // --------------------------
+
+        setValue(field.name, fieldValue, {
+          shouldValidate: true,
+          shouldDirty: true,
+          shouldTouch: true,
+        });
+      }
+
+      setFormConfigToLoadNext(null);
+      dispatch(
+        setMessage({
+          message: t("formConfig.loadSuccess", {
+            label: formConfigToLoadNext.label,
+          }),
+          type: "success",
+        }),
+      );
+    },
+    [
+      formConfigToLoadNext,
+      formConfig,
+      activeLang,
+      datasetOptions,
+      setValue,
+      dispatch,
+      t,
+    ],
+  );
+
+  async function onLoad(dragItem: DragItemFormConfig) {
+    try {
+      const config = await getFormConfig(dragItem.id);
+
+      if (config.formType !== activeFormType) {
+        dispatch(setExternalForm({ form: config.formType }));
+      }
+
+      setFormConfigToLoadNext(config);
+    } catch {
+      dispatch(
+        setMessage({
+          message: t("formConfig.loadError"),
+          type: "error",
+        }),
+      );
+    }
+  }
+
+  return (
+    <div className={root({ className })}>
+      <Dropzone
+        className={dropzone()}
+        onDrop={(item) => onLoad(item as DragItemFormConfig)}
+        acceptedDropTypes={DROP_TYPES}
+        naked
+        transparent
+      >
+        {children}
+      </Dropzone>
+    </div>
+  );
+};
+
+export default memo(FormConfigLoader);

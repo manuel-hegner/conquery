@@ -2,288 +2,285 @@ package com.bakdata.conquery.models.datasets.concepts;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import javax.annotation.Nullable;
-
+import com.bakdata.conquery.apiv1.frontend.FrontendFilterConfiguration;
+import com.bakdata.conquery.apiv1.frontend.FrontendList;
+import com.bakdata.conquery.apiv1.frontend.FrontendNode;
+import com.bakdata.conquery.apiv1.frontend.FrontendResultType;
+import com.bakdata.conquery.apiv1.frontend.FrontendRoot;
+import com.bakdata.conquery.apiv1.frontend.FrontendSecondaryId;
+import com.bakdata.conquery.apiv1.frontend.FrontendSelect;
+import com.bakdata.conquery.apiv1.frontend.FrontendTable;
+import com.bakdata.conquery.apiv1.frontend.FrontendValidityDate;
+import com.bakdata.conquery.apiv1.frontend.FrontendValue;
 import com.bakdata.conquery.io.storage.NamespaceStorage;
-import com.bakdata.conquery.apiv1.frontend.FEFilter;
-import com.bakdata.conquery.apiv1.frontend.FEList;
-import com.bakdata.conquery.apiv1.frontend.FENode;
-import com.bakdata.conquery.apiv1.frontend.FERoot;
-import com.bakdata.conquery.apiv1.frontend.FESecondaryId;
-import com.bakdata.conquery.apiv1.frontend.FESelect;
-import com.bakdata.conquery.apiv1.frontend.FETable;
-import com.bakdata.conquery.apiv1.frontend.FEValidityDate;
-import com.bakdata.conquery.apiv1.frontend.FEValue;
-import com.bakdata.conquery.models.auth.entities.User;
+import com.bakdata.conquery.models.auth.entities.Subject;
 import com.bakdata.conquery.models.auth.permissions.Ability;
+import com.bakdata.conquery.models.config.ConqueryConfig;
+import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.datasets.concepts.filters.Filter;
 import com.bakdata.conquery.models.datasets.concepts.select.Select;
 import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeChild;
-import com.bakdata.conquery.models.datasets.concepts.tree.ConceptTreeNode;
-import com.bakdata.conquery.models.datasets.Column;
 import com.bakdata.conquery.models.exceptions.ConceptConfigurationException;
 import com.bakdata.conquery.models.identifiable.Identifiable;
-import com.bakdata.conquery.models.identifiable.IdentifiableImpl;
-import com.bakdata.conquery.models.identifiable.ids.IId;
+import com.bakdata.conquery.models.identifiable.ids.Id;
+import com.bakdata.conquery.models.identifiable.ids.NamespacedId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConceptId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConceptTreeChildId;
 import com.bakdata.conquery.models.identifiable.ids.specific.StructureNodeId;
-import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.ArrayUtils;
 
 /**
  * This class constructs the concept tree as it is presented to the front end.
  */
-@AllArgsConstructor
+@Data
 @Slf4j
 public class FrontEndConceptBuilder {
 
-	public static FERoot createRoot(NamespaceStorage storage, User user) {
+	private final ConqueryConfig conqueryConfig;
 
-		FERoot root = new FERoot();
-		Map<IId<?>, FENode> roots = root.getConcepts();
-		
-		List<? extends Concept<?>> allConcepts = new ArrayList<>(storage.getAllConcepts());
-		// Remove any hidden concepts
-		allConcepts.removeIf(Concept::isHidden);
-		
-		if(allConcepts.isEmpty()) {
+	public FrontendRoot createRoot(NamespaceStorage storage, Subject subject, boolean showHidden) {
+
+		final FrontendRoot root = new FrontendRoot();
+		final Map<Id<?, ?>, FrontendNode> roots = root.getConcepts();
+
+		final List<? extends Concept<?>> allConcepts =
+				storage.getAllConcepts()
+					   // Remove any hidden concepts
+					   .filter(c -> !c.isHidden() || showHidden)
+					   .toList();
+
+		if (allConcepts.isEmpty()) {
 			log.warn("There are no displayable concepts in the dataset {}", storage.getDataset().getId());
 		}
 
 		// Submit all permissions to Shiro
-		boolean[] isPermitted = user.isPermitted(allConcepts, Ability.READ);
-		
-		for (int i = 0; i<allConcepts.size(); i++) {
-			if(isPermitted[i]) {
-				roots.put(allConcepts.get(i).getId(), createCTRoot(allConcepts.get(i), storage.getStructure()));
-			}
-		}
-		if(roots.isEmpty()) {
-			log.warn("No concepts could be collected for {} on dataset {}. The user is possibly lacking the permission to use them.", user.getId(), storage.getDataset().getId());
-		} else {
-			log.trace("Collected {} concepts for {} on dataset {}.", roots.size(), user.getId(), storage.getDataset().getId());
-		}
-		//add the structure tree
-		for(StructureNode sn : storage.getStructure()) {
-			FENode node = createStructureNode(sn, roots);
-			if(node == null) {
-				log.trace("Did not create a structure node entry for {}. Contained no concepts.", sn.getId());
+		final boolean[] isPermitted = subject.isPermitted(allConcepts, Ability.READ);
+
+		for (int i = 0; i < allConcepts.size(); i++) {
+			if (!isPermitted[i]) {
 				continue;
 			}
-			roots.put(sn.getId(), node);
+
+			Concept<?> concept = allConcepts.get(i);
+			roots.put(concept.getId(), createConceptRoot(concept, storage.getStructure()));
+		}
+
+		if (!allConcepts.isEmpty() && roots.isEmpty()) {
+			log.warn("The subject {} does not have permissions to see any concepts on {}.",
+					 subject.getId(),
+					 storage.getDataset()
+							.getId()
+			);
+		}
+
+		log.trace("Collected {} concepts for {} on dataset {}.", roots.size(), subject.getId(), storage.getDataset().getId());
+		//add the structure tree
+		for (StructureNode sn : storage.getStructure()) {
+			insertStructureNode(sn, roots);
 		}
 		//add all secondary IDs
 		root.getSecondaryIds()
-			.addAll(
-					storage.getSecondaryIds().stream()
-						   .map(sid -> new FESecondaryId(sid.getId().toString(), sid.getLabel(), sid.getDescription()))
-						   .collect(Collectors.toSet())
-			);
+			.addAll(storage.getSecondaryIds()
+						   .filter(sid -> !sid.isHidden() || showHidden)
+						   .map(sid -> new FrontendSecondaryId(sid.getId().toString(), sid.getLabel(), sid.getDescription()))
+						   .collect(Collectors.toSet()));
 
 		return root;
 	}
 
-	private static FENode createCTRoot(Concept<?> c, StructureNode[] structureNodes) {
+	private FrontendNode createConceptRoot(Concept<?> concept, StructureNode[] structureNodes) {
 
-		MatchingStats matchingStats = c.getMatchingStats();
+		final StructureNodeId
+				structureParent =
+				Arrays.stream(structureNodes)
+					  .flatMap(StructureNode::stream)
+					  .filter(sn -> sn.getContainedRoots().contains(concept.getId()))
+					  .findAny()
+					  .map(StructureNode::getId)
+					  .orElse(null);
 
-		StructureNodeId structureParent = Arrays
-			.stream(structureNodes)
-			.filter(sn->sn.getContainedRoots().contains(c.getId()))
-			.findAny()
-			.map(StructureNode::getId)
-			.orElse(null);
+		final MatchingStats matchingStats = concept.getMatchingStats();
+		boolean hasStats = matchingStats != null;
 
-		FENode n = FENode.builder()
-				.active(true)
-				.description(c.getDescription())
-				.label(c.getLabel())
-				.additionalInfos(c.getAdditionalInfos())
-				.matchingEntries(matchingStats.countEvents())
-				.matchingEntities(matchingStats.countEntities())
-				.dateRange(matchingStats.spanEvents() != null ? matchingStats.spanEvents().toSimpleRange() : null)
-				.detailsAvailable(Boolean.TRUE)
-				.codeListResolvable(c.countElements() > 1)
-				.parent(structureParent)
-				.selects(c
-					.getSelects()
-					.stream()
-					.map(FrontEndConceptBuilder::createSelect)
-					.collect(Collectors.toList())
-				)
-				.tables(c
-						.getConnectors()
-						.stream()
-						.map(FrontEndConceptBuilder::createTable)
-						.collect(Collectors.toList())
-				)
-				.build();
-		
-		if(c instanceof ConceptTreeNode) {
-			ConceptTreeNode<?> tree = (ConceptTreeNode<?>)c;
-			if(tree.getChildren()!=null) {
-				n.setChildren(
-					tree
-						.getChildren()
-						.stream()
-						.map(ConceptTreeChild::getId)
-						.toArray(ConceptTreeChildId[]::new)
-				);
-			}
+		final FrontendNode node =
+				FrontendNode.builder()
+							.active(true)
+							.description(concept.getDescription())
+							.label(concept.getLabel())
+							.additionalInfos(concept.getAdditionalInfos())
+							.matchingEntries(hasStats ? matchingStats.countEvents() : 0)
+							.matchingEntities(hasStats ? matchingStats.countEntities() : 0)
+							.dateRange(hasStats && matchingStats.spanEvents() != null ? matchingStats.spanEvents().toSimpleRange() : null)
+							.detailsAvailable(Boolean.TRUE)
+							.codeListResolvable(concept.countElements() > 1)
+							.parent(structureParent)
+							.excludeFromTimeAggregation(concept.isDefaultExcludeFromTimeAggregation() || concept.getConnectors()
+																												.stream()
+																												.map(Connector::getValidityDates)
+																												.flatMap(Collection::stream)
+																												.findAny()
+																												.isEmpty())
+							.selects(concept.getSelects().stream().map(this::createSelect).collect(Collectors.toList()))
+							.tables(concept.getConnectors().stream().map(this::createTable).collect(Collectors.toList()))
+							.build();
+
+		if (concept.getChildren() != null) {
+			node.setChildren(concept.getChildren().stream()
+									.map(ConceptTreeChild::getId)
+									.toArray(ConceptTreeChildId[]::new));
 		}
-		return n;
+		return node;
 	}
 
-	@Nullable
-	private static FENode createStructureNode(StructureNode cn, Map<IId<?>, FENode> roots) {
-		List<ConceptId> unstructured = new ArrayList<>();
-		for(ConceptId id : cn.getContainedRoots()) {
-			if(!roots.containsKey(id)) {
-				log.trace("Concept from structure node can not be found: {}", id);
+	/**
+	 * StructureNodes can be nested and the frontend needs them plain.
+	 * This method puts the given {@link StructureNode} and its children into the given root.
+	 * If the node references only instances not contained in the given roots element, it is skipped.
+	 * This method calls itself recursively.
+	 *
+	 * @param structureNode the node to process (and its children)
+	 * @param roots         the map where the given and child nodes are inserted into.
+	 */
+	private void insertStructureNode(StructureNode structureNode, Map<Id<?, ?>, FrontendNode> roots) {
+		final List<ConceptId> contained = new ArrayList<>();
+		for (ConceptId id : structureNode.getContainedRoots()) {
+			if (!roots.containsKey(id)) {
+				log.trace("Cannot find concept {} for StructureNode {}", id, structureNode.getId());
 				continue;
 			}
-			unstructured.add(id);
+			contained.add(id);
 		}
-		
-		if(unstructured.isEmpty()) {
-			return null;
+
+		if (contained.isEmpty() && structureNode.getChildren().isEmpty()) {
+			log.trace("Did not create a structure node entry for {}. Contained no concepts.", structureNode.getId());
+			return;
 		}
-		
-		return FENode.builder()
-			.active(false)
-			.description(cn.getDescription())
-			.label(cn.getLabel())
-			.detailsAvailable(Boolean.FALSE)
-			.codeListResolvable(false)
-			.additionalInfos(cn.getAdditionalInfos())
-			.parent(cn.getParent() == null ? null : cn.getParent().getId())
-			.children(
-				ArrayUtils.addAll(
-					cn.getChildren().stream()
-						.map(IdentifiableImpl::getId)
-						.toArray(IId[]::new),
-						unstructured.toArray(IId[]::new)
-				)
-			)
-			.build();
+
+		// Add Children to root
+		for (StructureNode n : structureNode.getChildren()) {
+			insertStructureNode(n, roots);
+		}
+
+		FrontendNode currentNode =
+				FrontendNode.builder()
+							.active(false)
+							.description(structureNode.getDescription())
+							.label(structureNode.getLabel())
+							.detailsAvailable(Boolean.FALSE)
+							.codeListResolvable(false)
+							.additionalInfos(structureNode.getAdditionalInfos())
+							.parent(structureNode.getParent() == null ? null : structureNode.getParent().getId())
+							.children(Stream.concat(structureNode.getChildren().stream().map(Identifiable::getId), contained.stream())
+											.toArray(NamespacedId[]::new))
+							.build();
+
+		roots.put(structureNode.getId(), currentNode);
 	}
 
-	private static FENode createCTNode(ConceptElement<?> ce) {
-		MatchingStats matchingStats = ce.getMatchingStats();
-		FENode n = FENode.builder()
-				.active(null)
-				.description(ce.getDescription())
-				.label(ce.getLabel())
-				.additionalInfos(ce.getAdditionalInfos())
-				.matchingEntries(matchingStats.countEvents())
-				.matchingEntities(matchingStats.countEntities())
-				.dateRange(matchingStats.spanEvents() != null ? matchingStats.spanEvents().toSimpleRange() : null)
-				.build();
-		
-		if(ce instanceof ConceptTreeNode) {
-			ConceptTreeNode<?> tree = (ConceptTreeNode<?>)ce;
-			if(tree.getChildren()!=null) {
-				n.setChildren(tree.getChildren().stream().map(IdentifiableImpl::getId).toArray(ConceptTreeChildId[]::new));
-			}
-			if (tree.getParent() != null) {
-				n.setParent(tree.getParent().getId());
-			}
-		}
-		return n;
+	public FrontendSelect createSelect(Select select) {
+		return FrontendSelect.builder()
+							 .id(select.getId())
+							 .label(select.getLabel())
+							 .description(select.getDescription())
+							 .resultType(FrontendResultType.from(select.getResultType()))
+							 .isDefault(select.isDefault())
+							 .build();
 	}
 
-	public static FETable createTable(Connector con) {
-		FETable result =
-				FETable.builder()
-					   .id(con.getTable().getId())
-					   .connectorId(con.getId())
-					   .label(con.getLabel())
-					   .filters(
-							   con.collectAllFilters()
-								  .stream()
-								  .map(FrontEndConceptBuilder::createFilter)
-								  .collect(Collectors.toList())
-					   )
-					   .selects(
-							   con.getSelects()
-								  .stream()
-								  .map(FrontEndConceptBuilder::createSelect)
-								  .collect(Collectors.toList())
-					   )
-					   .supportedSecondaryIds(
-							   Arrays.stream(con.getTable().getColumns())
-									 .map(Column::getSecondaryId)
-									 .filter(Objects::nonNull)
-									 .map(Identifiable::getId)
-									 .collect(Collectors.toSet())
-					   )
-					   .build();
-		
-		if(con.getValidityDates().size() > 1) {
-			result.setDateColumn(
-				new FEValidityDate(
-					null,
-						con
-						.getValidityDates()
-						.stream()
-							.map(vd -> new FEValue(vd.getLabel(), vd.getId().toString()))
-							.collect(Collectors.toList())
-				)
-			);
-			
-			if(!result.getDateColumn().getOptions().isEmpty()) {
-				result.getDateColumn().setDefaultValue(result.getDateColumn().getOptions().get(0).getValue());
+	public FrontendTable createTable(Connector con) {
+		final FrontendTable
+				result =
+				FrontendTable.builder()
+							 .id(con.resolveTableId())
+							 .connectorId(con.getId())
+							 .label(con.getLabel())
+							 .isDefault(con.isDefault())
+							 .filters(con.collectAllFilters().stream().map(this::createFilter).collect(Collectors.toList()))
+							 .selects(con.getSelects().stream().map(this::createSelect).collect(Collectors.toList()))
+							 .supportedSecondaryIds(Arrays.stream(con.getResolvedTable().getColumns())
+														  .map(Column::getSecondaryId)
+														  .filter(Objects::nonNull)
+														  .collect(Collectors.toSet()))
+							 .build();
+
+		if (!con.getValidityDates().isEmpty()) {
+			result.setDateColumn(new FrontendValidityDate(con.getValidityDatesDescription(), null,
+														  con.getValidityDates().stream()
+															 .map(vd -> new FrontendValue(vd.getId().toString(), vd.getLabel()))
+															 .collect(Collectors.toList())
+			));
+
+			if (!result.getDateColumn().getOptions().isEmpty()) {
+				result.getDateColumn().setDefaultValue(result.getDateColumn().getOptions().getFirst().getValue());
 			}
 		}
-		
+
 		return result;
 	}
 
-	public static FEFilter createFilter(Filter<?> filter) {
-		FEFilter f = FEFilter.builder()
-							 .id(filter.getId())
-							 .label(filter.getLabel())
-							 .description(filter.getDescription())
-							 .unit(filter.getUnit())
-							 .allowDropFile(filter.getAllowDropFile())
-							 .pattern(filter.getPattern())
-							 .build();
+	public FrontendFilterConfiguration.Top createFilter(Filter<?> filter) {
 		try {
-			filter.configureFrontend(f);
-			return f;
+			return filter.createFrontendConfig(conqueryConfig);
 		}
 		catch (ConceptConfigurationException e) {
 			throw new IllegalStateException(e);
 		}
 	}
 
-	public static FESelect createSelect(Select select) {
-		return FESelect
-					.builder()
-					.id(select.getId())
-					.label(select.getLabel())
-					.description(select.getDescription())
-					.resultType(select.getResultType())
-					.build();
+	private FrontendNode createCTNode(ConceptElement<?> ce) {
+		final MatchingStats matchingStats = ce.getMatchingStats();
+		FrontendNode.FrontendNodeBuilder nodeBuilder =
+				FrontendNode.builder()
+							.active(null)
+							.description(ce.getDescription())
+							.label(ce.getLabel())
+							.additionalInfos(ce.getAdditionalInfos())
+							.matchingEntries(matchingStats != null ? matchingStats.countEvents() : 0)
+							.matchingEntities(matchingStats != null ? matchingStats.countEntities() : 0)
+							.dateRange(matchingStats != null && matchingStats.spanEvents() != null
+									   ? matchingStats.spanEvents().toSimpleRange()
+									   : null);
+
+
+		if (ce instanceof Concept<?> concept) {
+			final boolean anyValidityDates = concept.getConnectors()
+													.stream()
+													.map(Connector::getValidityDates)
+													.flatMap(Collection::stream)
+													.findAny()
+													.isEmpty();
+
+			nodeBuilder = nodeBuilder.excludeFromTimeAggregation(concept.isDefaultExcludeFromTimeAggregation() || anyValidityDates);
+		}
+
+		if (ce.getChildren() != null) {
+			nodeBuilder = nodeBuilder.children(ce.getChildren().stream().map(ConceptElement::getId).toArray(ConceptTreeChildId[]::new));
+		}
+		if (ce.getParent() != null) {
+			nodeBuilder = nodeBuilder.parent(ce.getParent().getId());
+		}
+
+		return nodeBuilder.build();
 	}
 
-	public static FEList createTreeMap(Concept<?> concept) {
-		FEList map = new FEList();
+	public FrontendList createTreeMap(Concept<?> concept) {
+		final FrontendList map = new FrontendList();
 		fillTreeMap(concept, map);
 		return map;
 	}
 
-	private static void fillTreeMap(ConceptElement<?> ce, FEList map) {
+	private void fillTreeMap(ConceptElement<?> ce, FrontendList map) {
 		map.add(ce.getId(), createCTNode(ce));
-		if (ce instanceof ConceptTreeNode && ((ConceptTreeNode<?>) ce).getChildren() != null) {
-			for (ConceptTreeChild c : ((ConceptTreeNode<?>) ce).getChildren()) {
+		if (ce.getChildren() != null) {
+			for (ConceptTreeChild c : ce.getChildren()) {
 				fillTreeMap(c, map);
 			}
 		}

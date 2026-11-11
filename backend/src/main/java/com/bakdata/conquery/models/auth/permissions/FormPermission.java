@@ -1,8 +1,9 @@
 package com.bakdata.conquery.models.auth.permissions;
 
-import com.bakdata.conquery.io.cps.CPSType;
-
 import java.util.Set;
+
+import com.bakdata.conquery.io.cps.CPSType;
+import org.jetbrains.annotations.TestOnly;
 
 /**
  * Permission to restrict the usage of a specific form type.
@@ -11,12 +12,12 @@ import java.util.Set;
  */
 @CPSType(id = "FORM_TYPE", base = StringPermissionBuilder.class)
 public class FormPermission extends StringPermissionBuilder {
-	
+
 	public static final String DOMAIN = "forms";
 
 	private static final Set<Ability> ALLOWED_ABILITIES = Set.of(
 		Ability.CREATE);
-	
+
 	public final static FormPermission INSTANCE = new FormPermission();
 
 	@Override
@@ -34,7 +35,7 @@ public class FormPermission extends StringPermissionBuilder {
 		return INSTANCE.instancePermission(abilities, instance);
 	}
 
-	@Deprecated
+	@TestOnly
 	public static ConqueryPermission onInstance(Ability ability, String instance) {
 		return INSTANCE.instancePermission(ability, instance);
 	}

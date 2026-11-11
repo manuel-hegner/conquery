@@ -1,8 +1,7 @@
 package com.bakdata.conquery.models.query.filter.event.number;
 
 import java.util.Set;
-
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 
 import com.bakdata.conquery.models.common.IRange;
 import com.bakdata.conquery.models.datasets.Column;
@@ -18,7 +17,7 @@ import lombok.ToString;
  * There exist type specific implementations.
  * @param <RANGE> Range Type for inclusion test.
  */
-@ToString(of = {"column", "filterValue"})
+@ToString(callSuper = true, of = "column")
 public abstract class NumberFilterNode<RANGE extends IRange<?, ?>> extends EventFilterNode<RANGE> {
 
 
@@ -47,5 +46,4 @@ public abstract class NumberFilterNode<RANGE extends IRange<?, ?>> extends Event
 	public void collectRequiredTables(Set<Table> requiredTables) {
 		requiredTables.add(column.getTable());
 	}
-
 }

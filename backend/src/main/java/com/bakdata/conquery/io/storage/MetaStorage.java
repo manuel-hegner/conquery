@@ -1,7 +1,7 @@
 package com.bakdata.conquery.io.storage;
 
-import java.io.IOException;
-import java.util.Collection;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 import com.bakdata.conquery.io.jackson.Injectable;
 import com.bakdata.conquery.io.jackson.MutableInjectableValues;
@@ -11,196 +11,205 @@ import com.bakdata.conquery.models.auth.entities.User;
 import com.bakdata.conquery.models.config.StoreFactory;
 import com.bakdata.conquery.models.execution.ManagedExecution;
 import com.bakdata.conquery.models.forms.configs.FormConfig;
-import com.bakdata.conquery.models.identifiable.CentralRegistry;
 import com.bakdata.conquery.models.identifiable.ids.specific.FormConfigId;
 import com.bakdata.conquery.models.identifiable.ids.specific.GroupId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ManagedExecutionId;
 import com.bakdata.conquery.models.identifiable.ids.specific.RoleId;
 import com.bakdata.conquery.models.identifiable.ids.specific.UserId;
-import com.bakdata.conquery.models.worker.DatasetRegistry;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
-import lombok.Getter;
+import com.google.common.collect.ImmutableList;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Access to persisted entities that are not namespace/dataset crucial (see {@link NamespacedStorageImpl}).
+ * All entities are loaded through a cache. The cache can be configured through the StoreFactory.
+ */
 @Slf4j
 @RequiredArgsConstructor
 public class MetaStorage implements ConqueryStorage, Injectable {
 
-    private IdentifiableStore<ManagedExecution<?>> executions;
+	private final StoreFactory storageFactory;
+	private IdentifiableStore<ManagedExecution> executions;
+	private IdentifiableStore<FormConfig> formConfigs;
+	private IdentifiableStore<User> authUser;
+	private IdentifiableStore<Role> authRole;
+	private IdentifiableStore<Group> authGroup;
 
-    private IdentifiableStore<FormConfig> formConfigs;
-    private IdentifiableStore<User> authUser;
-    private IdentifiableStore<Role> authRole;
-    private IdentifiableStore<Group> authGroup;
-
-    @Getter
-    protected final CentralRegistry centralRegistry = new CentralRegistry();
-    @Getter
-	protected final DatasetRegistry datasetRegistry;
-
-    public void openStores(StoreFactory storageFactory) {
-		authUser = storageFactory.createUserStore(centralRegistry, "meta", this);
-		authRole = storageFactory.createRoleStore(centralRegistry, "meta", this);
-		authGroup = storageFactory.createGroupStore(centralRegistry, "meta", this);
-		// Executions depend on users
-		executions = storageFactory.createExecutionsStore(centralRegistry, datasetRegistry,  "meta");
-		formConfigs = storageFactory.createFormConfigStore(centralRegistry, datasetRegistry, "meta");
-
+	public static MetaStorage getInjected(DeserializationContext ctxt) throws JsonMappingException {
+		return (MetaStorage) ctxt
+				.findInjectableValue(MetaStorage.class.getName(), null, null);
 	}
 
-    @Override
-    public void loadData() {
+	@Override
+	public ImmutableList<ManagedStore> getStores() {
 		Preconditions.checkNotNull(authUser, "User storage was not created");
 		Preconditions.checkNotNull(authRole, "Role storage was not created");
 		Preconditions.checkNotNull(authGroup, "Group storage was not created");
 		Preconditions.checkNotNull(executions, "Execution storage was not created");
 		Preconditions.checkNotNull(formConfigs, "FormConfig storage was not created");
 
-        authUser.loadData();
-        authRole.loadData();
-        authGroup.loadData();
-
-        executions.loadData();
-		formConfigs.loadData();
+		return ImmutableList.of(
+				authUser,
+				authRole,
+				authGroup,
+				executions,
+				formConfigs
+		);
 	}
 
-    @Override
-    public void clear() {
-        centralRegistry.clear();
+	public void openStores(ObjectMapper mapper) {
+		if (mapper != null) {
+			this.injectInto(mapper);
+		}
+		authUser = storageFactory.createUserStore("meta", mapper);
+		authRole = storageFactory.createRoleStore("meta", mapper);
+		authGroup = storageFactory.createGroupStore("meta", mapper);
+		// Executions depend on users
+		executions = storageFactory.createExecutionsStore("meta", mapper);
+		formConfigs = storageFactory.createFormConfigStore("meta", mapper);
 
-		executions.clear();
-		formConfigs.clear();
+	}
 
-		authUser.clear();
-        authRole.clear();
-        authGroup.clear();
-    }
+	// Executions
 
-    @Override
-    public void removeStorage() {
-        executions.removeStore();
-        formConfigs.removeStore();
+	public void addExecution(ManagedExecution query) {
+		executions.add(query);
+	}
 
-        authUser.removeStore();
-        authRole.removeStore();
-        authGroup.removeStore();
-    }
+	public ManagedExecution getExecution(ManagedExecutionId id) {
+		return executions.get(id);
+	}
 
-    public void addExecution(ManagedExecution<?> query) {
-        executions.add(query);
-    }
+	public Stream<ManagedExecution> getAllExecutions() {
+		return executions.getAllKeys()
+						 .map(executions::get)
+						 .filter(Objects::nonNull);
+	}
 
-    public ManagedExecution<?> getExecution(ManagedExecutionId id) {
-        return executions.get(id);
-    }
+	public Stream<ManagedExecutionId> getAllExecutionIds() {
+		return executions.getAllKeys().map(ManagedExecutionId.class::cast);
+	}
 
-    public Collection<ManagedExecution<?>> getAllExecutions() {
-        return executions.getAll();
-    }
+	public synchronized void updateExecution(ManagedExecution query) {
+		executions.update(query);
+	}
 
-    public void updateExecution(ManagedExecution<?> query) {
-        executions.update(query);
-    }
+	public synchronized void removeExecution(ManagedExecutionId id) {
+		executions.remove(id);
+	}
 
-    public void removeExecution(ManagedExecutionId id) {
-        executions.remove(id);
-    }
+	// Groups
 
-    public void addUser(User user) {
-        authUser.add(user);
-    }
+	public synchronized void addGroup(Group group) {
+		log.info("Adding group = {}", group.getId());
+		authGroup.add(group);
+	}
 
-    public User getUser(UserId userId) {
-        return authUser.get(userId);
-    }
+	public Group getGroup(GroupId groupId) {
+		final Group group = authGroup.get(groupId);
+		log.trace("Requested group '{}' got: {}", groupId, group);
+		return group;
+	}
 
-    public Collection<User> getAllUsers() {
-        return authUser.getAll();
-    }
+	public Stream<Group> getAllGroups() {
+		return authGroup.getAllKeys().map(authGroup::get);
+	}
 
-    public void removeUser(UserId userId) {
-    	log.info("Remove User = {}", userId);
-        authUser.remove(userId);
-    }
+	public void removeGroup(GroupId id) {
+		log.info("Removing group = {}", id);
+		authGroup.remove(id);
+	}
 
-    public void addRole(Role role) {
-        authRole.add(role);
-    }
+	public synchronized void updateGroup(Group group) {
+		log.info("Updating group = {}", group.getId());
+		authGroup.update(group);
+	}
 
-    public Role getRole(RoleId roleId) {
-        return authRole.get(roleId);
-    }
+	// User
 
-    public Collection<Role> getAllRoles() {
-        return authRole.getAll();
-    }
+	public synchronized void addUser(User user) {
+		log.info("Adding user = {}", user.getId());
+		authUser.add(user);
+	}
 
-    public void removeRole(RoleId roleId) {
-        authRole.remove(roleId);
-    }
+	public User getUser(UserId userId) {
+		final User user = authUser.get(userId);
+		log.trace("Requested user '{}' got: {}", userId, user);
+		return user;
+	}
 
-    public void updateUser(User user) {
-        authUser.update(user);
-    }
+	public Stream<User> getAllUsers() {
+		return authUser.getAllKeys().map(authUser::get);
+	}
 
-    public void updateRole(Role role) {
-        authRole.update(role);
-    }
+	public synchronized void removeUser(UserId userId) {
+		log.info("Removing user = {}", userId);
+		authUser.remove(userId);
+	}
 
-    public void addGroup(Group group) {
-        authGroup.add(group);
-    }
+	public synchronized void updateUser(User user) {
+		log.info("Updating user = {}", user.getId());
+		authUser.update(user);
+	}
 
-    public Group getGroup(GroupId id) {
-        return authGroup.get(id);
-    }
+	// Roles
 
-    public Collection<Group> getAllGroups() {
-        return authGroup.getAll();
-    }
+	public synchronized void addRole(Role role) {
+		authRole.add(role);
+	}
 
-    public void removeGroup(GroupId id) {
-        authGroup.remove(id);
-    }
+	public Role getRole(RoleId roleId) {
+		final Role role = authRole.get(roleId);
+		log.trace("Requested role '{}' got: {}", roleId, role);
+		return role;
+	}
 
-    public void updateGroup(Group group) {
-        authGroup.update(group);
-    }
+	public Stream<Role> getAllRoles() {
+		return authRole.getAllKeys().map(authRole::get);
+	}
 
-    public FormConfig getFormConfig(FormConfigId id) {
-        return formConfigs.get(id);
-    }
+	public synchronized void removeRole(RoleId roleId) {
+		log.info("Removing role = {}", roleId);
+		authRole.remove(roleId);
+	}
 
-    public Collection<FormConfig> getAllFormConfigs() {
-        return formConfigs.getAll();
-    }
+	public synchronized void updateRole(Role role) {
+		log.info("Updating role = {}", role.getId());
+		authRole.update(role);
+	}
 
-    public void removeFormConfig(FormConfigId id) {
-        formConfigs.remove(id);
-    }
+	// FormConfigs
 
-    @SneakyThrows
-    public void updateFormConfig(FormConfig formConfig) {
-        formConfigs.update(formConfig);
-    }
+	public FormConfig getFormConfig(FormConfigId id) {
+		return formConfigs.get(id);
+	}
 
-    @SneakyThrows
-    public void addFormConfig(FormConfig formConfig) {
-        formConfigs.add(formConfig);
-    }
+	public Stream<FormConfig> getAllFormConfigs() {
+		return formConfigs.getAllKeys().map(formConfigs::get);
+	}
 
-    public void close() throws IOException {
-        executions.close();
-        formConfigs.close();
-        authUser.close();
-        authRole.close();
-        authGroup.close();
-    }
+	public synchronized void removeFormConfig(FormConfigId id) {
+		formConfigs.remove(id);
+	}
 
-    @Override
-    public MutableInjectableValues inject(MutableInjectableValues values) {
-        return values.add(MetaStorage.class, this);
-    }
+	@SneakyThrows
+	public synchronized void updateFormConfig(FormConfig formConfig) {
+		formConfigs.update(formConfig);
+	}
+
+	@SneakyThrows
+	public synchronized void addFormConfig(FormConfig formConfig) {
+		formConfigs.add(formConfig);
+	}
+
+	@Override
+	public MutableInjectableValues inject(MutableInjectableValues values) {
+		return values.add(MetaStorage.class, this);
+	}
+
 }

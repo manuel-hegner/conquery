@@ -4,30 +4,29 @@ import static com.bakdata.conquery.resources.ResourceConstants.*;
 
 import java.util.List;
 import java.util.stream.Collectors;
-
-import javax.annotation.PostConstruct;
-import javax.inject.Inject;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.Response.Status;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
 
 import com.bakdata.conquery.apiv1.AdditionalMediaTypes;
 import com.bakdata.conquery.io.jersey.ExtraMimeTypes;
-import com.bakdata.conquery.models.datasets.Dataset;
 import com.bakdata.conquery.models.datasets.Import;
 import com.bakdata.conquery.models.datasets.Table;
 import com.bakdata.conquery.models.identifiable.ids.specific.ConceptId;
+import com.bakdata.conquery.models.identifiable.ids.specific.DatasetId;
 import com.bakdata.conquery.models.identifiable.ids.specific.ImportId;
+import com.bakdata.conquery.models.identifiable.ids.specific.TableId;
 import com.bakdata.conquery.models.worker.Namespace;
-import com.bakdata.conquery.resources.hierarchies.HAdmin;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 
 @Produces({ExtraMimeTypes.JSON_STRING, ExtraMimeTypes.SMILE_STRING})
@@ -36,27 +35,17 @@ import lombok.Setter;
 @Getter
 @Setter
 @Path("datasets/{" + DATASET + "}/tables/{" + TABLE + "}")
-public class AdminTablesResource extends HAdmin {
+@RequiredArgsConstructor(onConstructor_ = {@Inject})
+public class AdminTablesResource {
 
-	@Inject
-	private AdminDatasetProcessor processor;
+	private final AdminDatasetProcessor processor;
 
 	@PathParam(DATASET)
-	protected Dataset dataset;
-	protected Namespace namespace;
-	@PathParam(TABLE)
-	protected Table table;
-
-	@PostConstruct
-	@Override
-	public void init() {
-		super.init();
-		this.namespace = processor.getDatasetRegistry().get(dataset.getId());
-	}
+	protected DatasetId dataset;
 
 	@GET
-	public Table getTable() {
-		return table;
+	public Table getTable(@PathParam(TABLE) TableId table) {
+		return table.resolve();
 	}
 
 
@@ -67,46 +56,37 @@ public class AdminTablesResource extends HAdmin {
 	 * @return List of dependent concepts.
 	 */
 	@DELETE
-	public Response remove(@QueryParam("force") @DefaultValue("false") boolean force) {
+	public Response remove(@PathParam(TABLE) TableId table, @QueryParam("force") @DefaultValue("false") boolean force) {
 		final List<ConceptId> dependents = processor.deleteTable(table, force);
 
 		if (!force && !dependents.isEmpty()) {
-			return Response.status(Status.CONFLICT)
-						   .entity(dependents)
-						   .build();
+			return Response.status(Status.CONFLICT).entity(dependents).build();
 		}
 
-		return Response.ok()
-					   .entity(dependents)
-					   .build();
+		return Response.ok().entity(dependents).build();
 	}
 
 	@GET
 	@Path("/imports")
 	@Produces(AdditionalMediaTypes.JSON)
-	public List<ImportId> listImports() {
-		return namespace.getStorage()
-						.getAllImports()
-						.stream()
-						.filter(imp -> imp.getTable().equals(table))
-						.map(Import::getId)
-						.collect(Collectors.toList());
+	public List<ImportId> listImports(@PathParam(TABLE) TableId table) {
+		Namespace namespace = processor.getDatasetRegistry().get(dataset);
+
+		return namespace.getStorage().getAllImports().filter(imp -> imp.getTable().equals(table)).collect(Collectors.toList());
 	}
 
 	@DELETE
 	@Path("imports/{" + IMPORT_ID + "}")
-	public void deleteImport(@PathParam(IMPORT_ID) Import imp) {
+	public void deleteImport(@PathParam(TABLE) TableId table, @PathParam(IMPORT_ID) ImportId imp) {
 		processor.deleteImport(imp);
 	}
 
 
 	@GET
 	@Path("imports/{" + IMPORT_ID + "}")
-	public Import getImport(@PathParam(IMPORT_ID) Import imp) {
-		return imp;
+	public Import getImport(@PathParam(TABLE) TableId table, @PathParam(IMPORT_ID) ImportId imp) {
+		return imp.resolve();
 	}
-
-
 
 
 }

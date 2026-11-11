@@ -1,78 +1,90 @@
-import styled from "@emotion/styled";
-import React from "react";
-import Highlighter from "react-highlight-words";
-
-import IconButton from "../button/IconButton";
+import { PencilIcon } from "lucide-react";
+import { tv } from "tailwind-variants";
 import HighlightableLabel from "../highlightable-label/HighlightableLabel";
-import WithTooltip from "../tooltip/WithTooltip";
-
+import { Button } from "./Button";
 import EditableTextForm from "./EditableTextForm";
+import { Highlighter } from "./Highlighter";
+import { Tooltip, TooltipTrigger } from "./Tooltip";
+import { C2 } from "./Typography";
 
-interface PropsT {
-  className?: string;
-  loading: boolean;
+// a flex wrapper, so the button does not sit on a text baseline and grow the row
+const editButton = tv({
+  base: "flex shrink-0",
+  variants: {
+    size: {
+      sm: "mr-2",
+      md: "mr-[10px]",
+    },
+  },
+});
+
+const text = tv({
+  base: "flex min-w-0 flex-row items-center",
+});
+
+const label = tv({
+  base: ["overflow-hidden", "text-ellipsis", "whitespace-nowrap"],
+});
+
+const EditableText = ({
+  editing,
+  text: textValue,
+  tooltip,
+  size = "md",
+  isHighlighted,
+  highlightedWords,
+  onSubmit,
+  onToggleEdit,
+}: {
   editing: boolean;
   text: string;
   tooltip?: string;
-  large?: boolean;
-  saveOnClickoutside?: boolean;
+  /** the button sizes; the field matches their height */
+  size?: "sm" | "md";
   isHighlighted?: boolean;
   highlightedWords?: string[];
-  selectTextOnMount?: boolean;
   onSubmit: (text: string) => void;
   onToggleEdit: () => void;
-}
-
-const SxIconButton = styled(IconButton)`
-  margin-right: ${({ large }) => (large ? "10px" : "7px")};
-  padding: 2px 0;
-`;
-
-const Text = styled("div")`
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-`;
-
-const SxHighlightableLabel = styled(HighlightableLabel)`
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-`;
-
-const EditableText: React.FC<PropsT> = (props) => {
-  return props.editing ? (
+}) => {
+  return editing ? (
     <EditableTextForm
-      className={props.className}
-      loading={props.loading}
-      text={props.text}
-      selectTextOnMount={props.selectTextOnMount}
-      saveOnClickoutside={props.saveOnClickoutside}
-      onSubmit={props.onSubmit}
-      onCancel={props.onToggleEdit}
+      size={size}
+      label={tooltip}
+      text={textValue}
+      onSubmit={(newText) => {
+        onSubmit(newText);
+        onToggleEdit();
+      }}
+      onCancel={onToggleEdit}
     />
   ) : (
-    <Text className={props.className}>
-      <WithTooltip text={props.tooltip}>
-        <SxIconButton
-          large={props.large}
-          bare
-          icon="pen"
-          onClick={props.onToggleEdit}
-        />
-      </WithTooltip>
-      <SxHighlightableLabel isHighlighted={props.isHighlighted}>
-        {props.highlightedWords && props.highlightedWords.length > 0 ? (
-          <Highlighter
-            searchWords={props.highlightedWords}
-            autoEscape
-            textToHighlight={props.text}
-          />
-        ) : (
-          props.text
-        )}
-      </SxHighlightableLabel>
-    </Text>
+    <div className={text()}>
+      <span className={editButton({ size })}>
+        <TooltipTrigger>
+          <Button
+            aria-label={tooltip}
+            intent="tertiary"
+            size={size}
+            onPress={onToggleEdit}
+          >
+            <PencilIcon />
+          </Button>
+          <Tooltip>{tooltip}</Tooltip>
+        </TooltipTrigger>
+      </span>
+      <HighlightableLabel className={label()} isHighlighted={isHighlighted}>
+        <C2 as="span">
+          {highlightedWords && highlightedWords.length > 0 ? (
+            <Highlighter
+              searchWords={highlightedWords}
+              textToHighlight={textValue}
+            />
+          ) : (
+            textValue
+          )}
+        </C2>
+      </HighlightableLabel>
+    </div>
   );
 };
 

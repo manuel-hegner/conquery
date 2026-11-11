@@ -1,12 +1,10 @@
 package com.bakdata.conquery.models.config;
 
-import com.bakdata.conquery.util.DateReader;
+import java.util.*;
+import jakarta.validation.constraints.NotNull;
+
 import lombok.Data;
 import lombok.Setter;
-
-import javax.validation.constraints.NotNull;
-
-import java.util.*;
 
 @Data
 @Setter

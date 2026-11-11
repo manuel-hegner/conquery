@@ -4,21 +4,20 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Set;
-
-import javax.validation.constraints.NotEmpty;
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 
 import com.bakdata.conquery.io.storage.MetaStorage;
 import com.bakdata.conquery.models.auth.permissions.ConqueryPermission;
-import com.bakdata.conquery.models.identifiable.IdentifiableImpl;
+import com.bakdata.conquery.models.identifiable.MetaIdentifiable;
 import com.bakdata.conquery.models.identifiable.ids.specific.PermissionOwnerId;
-import com.fasterxml.jackson.annotation.JacksonInject;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.OptBoolean;
 import com.google.common.collect.ImmutableSet;
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.NonNull;
 import lombok.Setter;
 import lombok.ToString;
@@ -29,11 +28,13 @@ import org.apache.shiro.authz.Permission;
  * The base class of security subjects in this project. Used to represent
  * persons and groups with permissions.
  *
- * @param <T> The id type by which an instance is identified
+ * @param <T> The id type by which an instance is identified.
+ * @implNote The NoArgsConstructor is private and used for deserialization
  */
 @Slf4j
 @EqualsAndHashCode(callSuper = false)
-public abstract class PermissionOwner<T extends PermissionOwnerId<? extends PermissionOwner<T>>> extends IdentifiableImpl<T> implements Comparable<PermissionOwner<?>> {
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public abstract class PermissionOwner<T extends PermissionOwnerId<? extends PermissionOwner<T>>> extends MetaIdentifiable<T> implements Comparable<PermissionOwner<?>> {
 
 	private static final Comparator<PermissionOwner<?>>
 			COMPARATOR =
@@ -56,20 +57,20 @@ public abstract class PermissionOwner<T extends PermissionOwnerId<? extends Perm
 	protected String label;
 
 	@ToString.Exclude
-	@Getter(AccessLevel.PRIVATE) // So only Jackson can use this to deserialize
 	@NotNull
 	private Set<ConqueryPermission> permissions = new HashSet<>();
 
-	@JacksonInject(useInput = OptBoolean.FALSE)
-	@NonNull
-	@EqualsAndHashCode.Exclude
-	protected MetaStorage storage;
 
+	@JsonCreator
+	public PermissionOwner(String name, String label) {
+		this.name = name;
+		this.label = label;
+	}
 
 	public PermissionOwner(String name, String label, MetaStorage storage) {
 		this.name = name;
 		this.label = label;
-		this.storage = storage;
+		setMetaStorage(storage);
 	}
 
 
@@ -81,37 +82,20 @@ public abstract class PermissionOwner<T extends PermissionOwnerId<? extends Perm
 	 */
 	public synchronized void addPermissions(Set<ConqueryPermission> permissions) {
 		this.permissions = ImmutableSet
-								   .<ConqueryPermission>builder()
-								   .addAll(this.permissions)
-								   .addAll(permissions)
-								   .build();
+				.<ConqueryPermission>builder()
+				.addAll(this.permissions)
+				.addAll(permissions)
+				.build();
 		updateStorage();
 	}
 
 	public synchronized void addPermission(ConqueryPermission permission) {
 		this.permissions = ImmutableSet
-								   .<ConqueryPermission>builder()
-								   .addAll(this.permissions)
-								   .add(permission)
-								   .build();
+				.<ConqueryPermission>builder()
+				.addAll(this.permissions)
+				.add(permission)
+				.build();
 		updateStorage();
-	}
-
-	/**
-	 * Removes permissions from the owner object and from the persistent storage.
-	 *
-	 * @param permissions The permission to remove.
-	 * @return Returns the added Permission
-	 */
-	public boolean removePermissions(Set<ConqueryPermission> permissions) {
-		boolean ret = false;
-		synchronized (this) {
-			Set<ConqueryPermission> newSet = new HashSet<>(this.permissions);
-			ret = newSet.removeAll(permissions);
-			this.permissions = newSet;
-			updateStorage();
-		}
-		return ret;
 	}
 
 	public boolean removePermission(Permission permission) {
@@ -140,6 +124,12 @@ public abstract class PermissionOwner<T extends PermissionOwnerId<? extends Perm
 
 	}
 
+	/**
+	 * Returns a collection of the effective permissions. These are the permissions of the owner and
+	 * the permission of the roles/groups it inherits from.
+	 *
+	 * @return Owned and inherited permissions.
+	 */
 	@JsonIgnore
 	public abstract Set<ConqueryPermission> getEffectivePermissions();
 

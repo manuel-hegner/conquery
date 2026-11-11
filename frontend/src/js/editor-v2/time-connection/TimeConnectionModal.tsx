@@ -1,0 +1,221 @@
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { tv } from "tailwind-variants";
+
+import { exists } from "../../common/helpers/exists";
+import { ComboBoxField } from "../../ui-components/ComboBoxField";
+import { Modal, ModalBody, ModalHeader } from "../../ui-components/Modal";
+import { NumberField } from "../../ui-components/NumberField";
+import { C2 } from "../../ui-components/Typography";
+import type { TimeOperator, TimeTimestamp, TreeChildrenTime } from "../types";
+import { useGetNodeLabel } from "../util";
+
+const content = tv({
+  base: ["flex flex-col", "gap-[15px]"],
+});
+
+const row = tv({
+  base: ["flex items-center", "gap-[15px]"],
+});
+
+const conceptName = tv({
+  base: ["grow", "whitespace-nowrap"],
+});
+
+export const TimeConnectionModal = memo(
+  ({
+    conditions,
+    onChange,
+    onClose,
+  }: {
+    conditions: TreeChildrenTime;
+    onChange: (conditions: TreeChildrenTime) => void;
+    onClose: () => void;
+  }) => {
+    const conditionsRef = useRef(conditions);
+    conditionsRef.current = conditions;
+
+    const onChangeRef = useRef(onChange);
+    onChangeRef.current = onChange;
+
+    const { t } = useTranslation();
+    const TIMESTAMP_OPTIONS = useMemo(
+      () => [
+        { value: "ANY", label: t("editorV2.ANY") },
+        { value: "LATEST", label: t("editorV2.LATEST") },
+        { value: "EARLIEST", label: t("editorV2.EARLIEST") },
+        { value: "ALL", label: t("editorV2.ALL") },
+      ],
+      [t],
+    );
+    const OPERATOR_OPTIONS = useMemo(
+      () => [
+        { value: "BEFORE", label: t("editorV2.BEFORE") },
+        { value: "AFTER", label: t("editorV2.AFTER") },
+        { value: "WHILE", label: t("editorV2.WHILE") },
+      ],
+      [t],
+    );
+
+    const INTERVAL_OPTIONS = useMemo(
+      () => [
+        { value: "ANY", label: t("editorV2.intervalSome") },
+        { value: "dayInterval", label: t("editorV2.dayInterval") },
+      ],
+      [t],
+    );
+
+    const [aTimestamp, setATimestamp] = useState(conditions.timestamps[0]);
+    const [bTimestamp, setBTimestamp] = useState(conditions.timestamps[1]);
+    const [operator, setOperator] = useState(conditions.operator);
+    const [interval, setTheInterval] = useState(conditions.interval);
+
+    const getNodeLabel = useGetNodeLabel();
+    const a = getNodeLabel(conditions.items[0]);
+    const b = getNodeLabel(conditions.items[1]);
+
+    useEffect(() => {
+      onChangeRef.current({
+        ...conditionsRef.current,
+        timestamps: [aTimestamp, bTimestamp],
+      });
+    }, [aTimestamp, bTimestamp]);
+
+    useEffect(() => {
+      onChangeRef.current({
+        ...conditionsRef.current,
+        operator,
+      });
+    }, [operator]);
+
+    useEffect(() => {
+      onChangeRef.current({
+        ...conditionsRef.current,
+        interval,
+      });
+    }, [interval]);
+
+    return (
+      <Modal
+        isOpen
+        onOpenChange={(isOpen) => {
+          if (!isOpen) onClose();
+        }}
+      >
+        <ModalHeader>{t("editorV2.editTimeConnection")}</ModalHeader>
+        <ModalBody>
+          <div className={content()}>
+            <div className={row()}>
+              <div className="min-w-[150px] basis-0">
+                <ComboBoxField
+                  aria-label={t("editorV2.timestamp")}
+                  options={TIMESTAMP_OPTIONS}
+                  value={TIMESTAMP_OPTIONS.find((o) => o.value === aTimestamp)!}
+                  onChange={(opt) => {
+                    if (opt) {
+                      setATimestamp(opt.value as TimeTimestamp);
+                    }
+                  }}
+                />
+              </div>
+              <span className="whitespace-nowrap">
+                <C2 as="span">{t("editorV2.dateRangeFrom")}</C2>
+              </span>
+              <span className={conceptName()}>
+                <C2 as="span" strong tone="primary">
+                  {a}
+                </C2>
+              </span>
+            </div>
+            <div className={row()}>
+              <div className="w-[100px]">
+                <NumberField
+                  aria-label={t("editorV2.intervalMin")}
+                  placeholder={operator === "WHILE" ? "0" : "1"}
+                  minValue={0}
+                  value={exists(interval) ? interval.min : null}
+                  isDisabled={!interval || operator === "WHILE"}
+                  onChange={(val) => {
+                    setTheInterval({
+                      min: val,
+                      max: interval ? interval.max : null,
+                    });
+                  }}
+                />
+              </div>
+              <span>–</span>
+              <div className="w-[100px]">
+                <NumberField
+                  aria-label={t("editorV2.intervalMax")}
+                  placeholder={operator === "WHILE" ? "0" : "∞"}
+                  minValue={0}
+                  value={exists(interval) ? interval.max : null}
+                  isDisabled={!interval || operator === "WHILE"}
+                  onChange={(val) => {
+                    setTheInterval({
+                      max: val,
+                      min: interval ? interval.min : null,
+                    });
+                  }}
+                />
+              </div>
+              <div className="min-w-[150px] basis-0">
+                <ComboBoxField
+                  aria-label={t("editorV2.interval")}
+                  options={INTERVAL_OPTIONS}
+                  value={!interval ? INTERVAL_OPTIONS[0] : INTERVAL_OPTIONS[1]}
+                  isDisabled={operator === "WHILE"}
+                  onChange={(opt) => {
+                    if (opt?.value === "ANY") {
+                      setTheInterval(undefined);
+                    } else if (opt) {
+                      setTheInterval({ min: 1, max: null });
+                    }
+                  }}
+                />
+              </div>
+              <div className="min-w-[150px] basis-0">
+                <ComboBoxField
+                  aria-label={t("editorV2.operator")}
+                  options={OPERATOR_OPTIONS}
+                  value={OPERATOR_OPTIONS.find((o) => o.value === operator)!}
+                  onChange={(opt) => {
+                    if (opt) {
+                      setOperator(opt.value as TimeOperator);
+                      if (opt.value === "WHILE") {
+                        // Timeout to avoid race condition on effect update above
+                        setTimeout(() => setTheInterval(undefined), 10);
+                      }
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <div className={row()}>
+              <div className="min-w-[150px] basis-0">
+                <ComboBoxField
+                  aria-label={t("editorV2.timestamp")}
+                  options={TIMESTAMP_OPTIONS}
+                  value={TIMESTAMP_OPTIONS.find((o) => o.value === bTimestamp)!}
+                  onChange={(opt) => {
+                    if (opt) {
+                      setBTimestamp(opt.value as TimeTimestamp);
+                    }
+                  }}
+                />
+              </div>
+              <span className="whitespace-nowrap">
+                <C2 as="span">{t("editorV2.dateRangeFrom")}</C2>
+              </span>
+              <span className={conceptName()}>
+                <C2 as="span" strong tone="primary">
+                  {b}
+                </C2>
+              </span>
+            </div>
+          </div>
+        </ModalBody>
+      </Modal>
+    );
+  },
+);

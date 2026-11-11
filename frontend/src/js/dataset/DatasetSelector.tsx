@@ -1,38 +1,43 @@
-import { css } from "@emotion/react";
-import styled from "@emotion/styled";
-import { StateT } from "app-types";
-import React, { FC } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
+import { tv } from "tailwind-variants";
 
+import type { DatasetT, SelectOptionT } from "../api/types";
+import type { StateT } from "../app/reducers";
 import { exists } from "../common/helpers/exists";
-import type { StandardQueryStateT } from "../standard-query-editor/queryReducer";
-import WithTooltip from "../tooltip/WithTooltip";
-import ReactSelect from "../ui-components/ReactSelect";
+import { ComboBoxField } from "../ui-components/ComboBoxField";
+import {
+  Tooltip,
+  TooltipTarget,
+  TooltipTrigger,
+  tooltipDelay,
+} from "../ui-components/Tooltip";
 
 import { useSelectDataset } from "./actions";
-import { DatasetT } from "./reducer";
 
-const becauseWeCantStyleReactSelectWithGenericProps = css`
-  > div {
-    min-width: 300px;
-  }
-`;
-const Root = styled("label")`
-  color: ${({ theme }) => theme.col.black};
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  ${becauseWeCantStyleReactSelectWithGenericProps};
-`;
+const root = tv({
+  base: ["flex items-center justify-end", "text-gray-800"],
+});
 
-const Headline = styled("span")`
-  font-size: ${({ theme }) => theme.col.grayLight};
-  padding-right: 20px;
-`;
+/* the old styles set `font-size: #dadada` (a color) — invalid, so the
+   font size was always inherited; only the padding was real */
+const headline = tv({ base: "pr-3" });
 
-const DatasetSelector: FC = () => {
-  const { t } = useTranslation();
+const useIsDatasetSelectDisabled = () => {
+  const isHistoryOpen = useSelector<StateT, boolean>(
+    (state) => state.entityHistory.isOpen,
+  );
+  const isPreviewOpen = useSelector<StateT, boolean>(
+    (state) => state.preview.isOpen,
+  );
+
+  return useMemo(() => {
+    return isHistoryOpen || isPreviewOpen;
+  }, [isHistoryOpen, isPreviewOpen]);
+};
+
+const DatasetSelector = () => {
   const selectedDatasetId = useSelector<StateT, string | null>(
     (state) => state.datasets.selectedDatasetId,
   );
@@ -42,38 +47,87 @@ const DatasetSelector: FC = () => {
   const error = useSelector<StateT, string | null>(
     (state) => state.datasets.error,
   );
-  const query = useSelector<StateT, StandardQueryStateT>(
-    (state) => state.queryEditor.query,
-  );
 
   const selectDataset = useSelectDataset();
 
-  const onSelectDataset = (datasetId: string | null) =>
-    selectDataset(datasets, datasetId, selectedDatasetId, query);
+  const onChange = useCallback(
+    (value: SelectOptionT | null) => {
+      if (exists(value)) selectDataset(value.value as string);
+    },
+    [selectDataset],
+  );
 
-  const options =
-    datasets && datasets.map((db) => ({ value: db.id, label: db.label }));
-  const selected = options.find((set) => selectedDatasetId === set.value);
+  const options = useMemo(
+    () => datasets.map((db) => ({ value: db.id, label: db.label })),
+    [datasets],
+  );
+
+  const selected = useMemo(
+    () => options.find((set) => selectedDatasetId === set.value),
+    [options, selectedDatasetId],
+  );
+
+  const disabled = useIsDatasetSelectDisabled();
 
   return (
-    <WithTooltip text={t("help.datasetSelector")} lazy>
-      <Root>
-        <Headline>{t("datasetSelector.label")}</Headline>
-        <ReactSelect<false>
-          name="dataset-selector"
-          value={error ? null : selected}
-          onChange={(value) =>
-            exists(value) ? onSelectDataset(value.value) : onSelectDataset(null)
-          }
-          placeholder={
-            error ? t("datasetSelector.error") : t("inputSelect.placeholder")
-          }
-          isDisabled={!!error}
-          options={options}
-        />
-      </Root>
-    </WithTooltip>
+    <DatasetSelectorUI
+      options={options}
+      selected={selected}
+      onChange={onChange}
+      error={error}
+      disabled={disabled}
+    />
   );
 };
+
+interface DatasetSelectorUIProps {
+  error: string | null;
+  selected?: SelectOptionT;
+  disabled?: boolean;
+  options: SelectOptionT[];
+  onChange: (datasetId: SelectOptionT | null) => void;
+}
+
+const DatasetSelectorUI = memo(
+  ({
+    selected,
+    onChange,
+    error,
+    options,
+    disabled,
+  }: DatasetSelectorUIProps) => {
+    const { t } = useTranslation();
+
+    return (
+      <TooltipTrigger delay={tooltipDelay.long}>
+        <TooltipTarget
+          as="div"
+          excludeFromTabOrder
+          className={root()}
+          data-test-id="dataset-selector"
+        >
+          <span className={headline()}>{t("datasetSelector.label")}</span>
+          <div className="min-w-[300px]">
+            <ComboBoxField
+              aria-label={t("datasetSelector.label")}
+              value={selected || null}
+              onChange={onChange}
+              placeholder={
+                error
+                  ? t("datasetSelector.error")
+                  : t("inputSelect.placeholder")
+              }
+              isDisabled={disabled || exists(error)}
+              options={options}
+            />
+          </div>
+        </TooltipTarget>
+        <Tooltip>
+          {disabled ? t("datasetSelector.disabled") : t("help.datasetSelector")}
+        </Tooltip>
+      </TooltipTrigger>
+    );
+  },
+);
 
 export default DatasetSelector;

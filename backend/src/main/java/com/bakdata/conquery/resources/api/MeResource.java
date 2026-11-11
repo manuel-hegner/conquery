@@ -1,14 +1,15 @@
 package com.bakdata.conquery.resources.api;
 
-import javax.inject.Inject;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.MediaType;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
 
 import com.bakdata.conquery.apiv1.MeProcessor;
-import com.bakdata.conquery.apiv1.MeProcessor.FEMeInformation;
+import com.bakdata.conquery.apiv1.MeProcessor.FrontendMeInformation;
 import com.bakdata.conquery.resources.hierarchies.HAuthorized;
+import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 
 /**
@@ -18,14 +19,14 @@ import lombok.Setter;
  */
 @Path("me")
 @Setter
+@RequiredArgsConstructor(onConstructor_ = {@Inject})
 public class MeResource extends HAuthorized {
 
-	@Inject
-	private MeProcessor processor;
+	private final MeProcessor processor;
 
 	@Produces(MediaType.APPLICATION_JSON)
 	@GET
-	public FEMeInformation getUserInformation() {
-		return processor.getUserInformation(user);
+	public FrontendMeInformation getUserInformation() {
+		return processor.getUserInformation(subject.getUser());
 	}
 }

@@ -30,7 +30,7 @@ public class ArrayConceptQueryPlan implements QueryPlan<SinglelineEntityResult> 
 	public static final int VALIDITY_DATE_POSITION = 0;
 	private List<ConceptQueryPlan> childPlans;
 	@ToString.Exclude
-	private boolean generateDateAggregation;
+	private final boolean generateDateAggregation;
 	private final DateAggregator validityDateAggregator = new DateAggregator(DateAggregationAction.MERGE);
 
 	public ArrayConceptQueryPlan(boolean generateDateAggregation) {
@@ -56,7 +56,7 @@ public class ArrayConceptQueryPlan implements QueryPlan<SinglelineEntityResult> 
 	 * @param context      Primarily used to decide if a SpecialDateUnion needs to be
 	 *                     generated.
 	 */
-	public void addChildPlans(List<ConceptQuery> childQueries, QueryPlanContext context) {
+	public void addChildQueries(List<ConceptQuery> childQueries, QueryPlanContext context) {
 
 		childPlans = new ArrayList<>();
 		for (ConceptQuery child : childQueries) {
